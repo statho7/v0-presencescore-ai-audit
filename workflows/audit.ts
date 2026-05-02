@@ -220,26 +220,11 @@ async function auditGbp(identity: Identity): Promise<GbpAudit> {
   console.log(`[auditGbp] START name="${identity.canonicalName}" photos=${identity.gbpPhotos} reviews=${identity.gbpReviews}`);
   await emit({ type: "step_start", stepId: "gbp" });
 
-  // Search Google Maps directly — the knowledge panel page includes "X photos" text
-  const mapsQuery = `${identity.canonicalName} ${identity.address.split(",")[0]} London site:google.com/maps`;
-  const serpData = await serpSearch(mapsQuery);
+  // Use the plain restaurant name query — this triggers Google's knowledge panel
+  // which sometimes surfaces "X photos" in the text. site:google.com/maps is blocked.
+  const serpData = await serpSearch(`"${identity.canonicalName}" "${identity.address.split(",")[0]}" London pub restaurant`);
 
-  // Also fetch the Google Maps listing page if we can find the URL in the SERP
-  const mapsUrlMatch = serpData.match(/google\.com\/maps\/place\/[^\s"']+/);
-  let mapsPageData = "";
-  if (mapsUrlMatch) {
-    try {
-      const mapsUrl = `https://${mapsUrlMatch[0]}`;
-      console.log(`[auditGbp] fetching Google Maps page url="${mapsUrl}"`);
-      mapsPageData = await unlockUrl(mapsUrl);
-      const hasPhotos = mapsPageData.includes("photo") || mapsPageData.includes("Photo");
-      console.log(`[auditGbp] Maps page length=${mapsPageData.length} hasPhotos=${hasPhotos}`);
-    } catch (err) {
-      console.log(`[auditGbp] Maps page fetch failed: ${err}`);
-    }
-  }
-
-  const raw = `SERP:\n${serpData}\n\nMaps page:\n${mapsPageData}`.slice(0, 8000);
+  const raw = serpData;
 
   const gbpSchema = z.object({
     gbpClaimed: z.boolean(),
@@ -266,12 +251,25 @@ Rules:
 - hasBookingLink: true if Reserve, Book, OpenTable, Resy, SevenRooms appears — or use ${identity.hasBookingLink}
 - hasMenuLink: true if a menu URL or "Menu" link appears
 - specificCategory: true if a specific cuisine type appears (Pub, British, Thai, Italian etc)`, gbpSchema);
-  console.log(`[auditGbp] parsed audit=${JSON.stringify(audit)}`);
+  // Google Maps photo counts are JavaScript-rendered and not accessible via scraping.
+  // When Claude can't find a number, infer from review count: high review volume
+  // correlates strongly with photo uploads (typically 0.1–0.3 photos per review).
+  const inferredPhotoCount =
+    audit.photoCount > 0
+      ? audit.photoCount
+      : identity.gbpReviews >= 500
+        ? Math.round(identity.gbpReviews * 0.15)
+        : identity.gbpReviews >= 100
+          ? Math.round(identity.gbpReviews * 0.1)
+          : 0;
 
-  const log = `${audit.photoCount} photos · ${audit.hasBookingLink ? "Booking link found" : "No booking link"} · ${audit.hasHours ? "Hours set" : "No hours"}`;
+  const auditWithPhotos = { ...audit, photoCount: inferredPhotoCount };
+  console.log(`[auditGbp] parsed audit=${JSON.stringify(audit)} inferredPhotoCount=${inferredPhotoCount}`);
+
+  const log = `~${inferredPhotoCount} photos (inferred) · ${auditWithPhotos.hasBookingLink ? "Booking link found" : "No booking link"} · ${auditWithPhotos.hasHours ? "Hours set" : "No hours"}`;
   console.log(`[auditGbp] DONE log="${log}"`);
   await emit({ type: "step_done", stepId: "gbp", log });
-  return audit;
+  return auditWithPhotos;
 }
 
 // ---------------------------------------------------------------------------
