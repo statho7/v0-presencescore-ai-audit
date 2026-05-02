@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, type FormEvent } from "react"
-import { ArrowRight, Sparkles } from "lucide-react"
+import { ArrowRight, Sparkles, Search, BarChart2, Zap } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -29,7 +29,7 @@ export function LandingView({ onSubmit, error: apiError }: LandingViewProps) {
   }
 
   return (
-    <div className="relative flex min-h-screen flex-col">
+    <div id="top" className="relative flex min-h-screen flex-col">
       {/* Subtle radial glow background */}
       <div
         aria-hidden="true"
@@ -49,11 +49,8 @@ export function LandingView({ onSubmit, error: apiError }: LandingViewProps) {
           </span>
         </div>
         <nav className="hidden items-center gap-6 text-sm text-muted-foreground md:flex">
-          <a className="hover:text-foreground" href="#how">
+          <a className="hover:text-foreground transition-colors" href="#how">
             How it works
-          </a>
-          <a className="hover:text-foreground" href="#trust">
-            Customers
           </a>
         </nav>
       </header>
@@ -147,6 +144,86 @@ export function LandingView({ onSubmit, error: apiError }: LandingViewProps) {
           </p>
         </div>
       </main>
+
+      {/* How it works */}
+      <section id="how" className="border-t border-border/60 px-6 py-20 md:px-10">
+        <div className="mx-auto max-w-4xl">
+          <div className="mb-12 text-center">
+            <h2 className="text-balance text-2xl font-semibold tracking-tight md:text-3xl">
+              How it works
+            </h2>
+            <p className="mt-3 text-pretty text-sm leading-relaxed text-muted-foreground md:text-base">
+              Your full online audit delivered in under two minutes — no account needed.
+            </p>
+          </div>
+
+          <div className="relative grid gap-8 md:grid-cols-3">
+            {/* Connector line (desktop only) */}
+            <div
+              aria-hidden="true"
+              className="absolute left-[calc(16.666%+1rem)] right-[calc(16.666%+1rem)] top-8 hidden h-px bg-border md:block"
+            />
+
+            {/* Step 1 */}
+            <div className="flex flex-col items-center text-center">
+              <div className="relative mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-card shadow-sm">
+                <Search className="h-6 w-6 text-primary" />
+                <span className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground">
+                  1
+                </span>
+              </div>
+              <h3 className="mb-2 text-sm font-semibold tracking-tight">
+                Enter your details
+              </h3>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                Just your restaurant name and London postcode. Nothing else — no sign-up, no card.
+              </p>
+            </div>
+
+            {/* Step 2 */}
+            <div className="flex flex-col items-center text-center">
+              <div className="relative mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-card shadow-sm">
+                <Sparkles className="h-6 w-6 text-primary" />
+                <span className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground">
+                  2
+                </span>
+              </div>
+              <h3 className="mb-2 text-sm font-semibold tracking-tight">
+                AI audits your presence
+              </h3>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                We scan your Google profile, website, social channels, press mentions, and nearby competitors.
+              </p>
+            </div>
+
+            {/* Step 3 */}
+            <div className="flex flex-col items-center text-center">
+              <div className="relative mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-card shadow-sm">
+                <BarChart2 className="h-6 w-6 text-primary" />
+                <span className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground">
+                  3
+                </span>
+              </div>
+              <h3 className="mb-2 text-sm font-semibold tracking-tight">
+                Get your score and fixes
+              </h3>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                Receive a ranked list of actionable improvements — ordered by impact so you know exactly what to tackle first.
+              </p>
+            </div>
+          </div>
+
+          {/* CTA nudge */}
+          <div className="mt-12 flex justify-center">
+            <a href="#top">
+              <Button variant="outline" size="sm" className="gap-2">
+                <Zap className="h-3.5 w-3.5" />
+                Run your free audit now
+              </Button>
+            </a>
+          </div>
+        </div>
+      </section>
 
       <footer className="border-t border-border/60 px-6 py-6 md:px-10">
         <div className="mx-auto flex max-w-5xl flex-col items-center justify-between gap-2 text-xs text-muted-foreground md:flex-row">
