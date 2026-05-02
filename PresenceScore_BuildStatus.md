@@ -5,7 +5,7 @@
 
 ## Overall Assessment
 
-**~95% MVP-complete.** All 8 pipeline steps working end-to-end with real external data. Full UI built including coverage timeline. Scoring model fully aligned with brief. PDF generation merged (pending on main — PR open). One scoring signal (engagement above median) structurally deferred. Everything described in the hackathon MVP scope is implemented or in a mergeable PR.
+**~97% MVP-complete.** All 8 pipeline steps working end-to-end with real external data. Full UI built including coverage timeline with pagination. PDF generation merged and live. Scoring model fully aligned with brief. Press pipeline significantly improved (date-sorted, venue-suffix-aware, up to 100 results). One scoring signal (engagement above median) structurally deferred.
 
 ---
 
@@ -16,8 +16,8 @@
 | Identity resolution | Name, address, GBP URL, competitor set | ✅ Working | SERP → Claude structured output |
 | GBP audit | Claimed, photos, hours, booking, 3-pack | ✅ Working | Photo count inferred from reviews (see below) |
 | Website audit | Loads, mobile, booking, schema, menu, allergen | ✅ Working | HTML scraped via Bright Data Web Unlocker |
-| Instagram audit | Account, followers, frequency, reels, engagement | ✅ Working | Direct fetch → SERP fallback; `postedLast14Days` + `customerInstagramPosts` now extracted |
-| Press coverage | Google News scrape, sentiment, tier classification | ✅ Working | Per-article data (title, source, date, url, sentiment, tier) fully extracted |
+| Instagram audit | Account, followers, frequency, reels, engagement | ✅ Working | Direct fetch → SERP fallback; `postedLast14Days` + `customerInstagramPosts` extracted |
+| Press coverage | Google News scrape, sentiment, tier classification | ✅ Working | Dual SERP (news + site-filtered), date-sorted newest-first, up to 100 results, per-article source/date/url extracted |
 | Competitor benchmark | 5 nearest venues, side-by-side scoring | ✅ Working | Single SERP + structured output |
 | Score calculation | 6 dimensions, 0–100 | ✅ Working | Matches brief's weighting exactly |
 | Narrative + quick wins | 3 paragraphs + top 3 actions | ✅ Working | Claude-generated, no parse errors |
@@ -33,10 +33,11 @@
 | Results dashboard | ✅ Built | Score dial, dimension bars, quick wins cards, 3-paragraph narrative |
 | Score dial (0–100, colour-coded) | ✅ Built | SVG animated circle, green/amber/red zones |
 | Dimension score bars (6 dims) | ✅ Built | Discovery, Conversion, Social, Press, UGC, Competitive |
-| Coverage timeline chart | ✅ Built | Stacked bar chart (recharts), per-quarter, colour by sentiment, article list below |
+| Coverage timeline chart | ✅ Built | Dynamic quarter range from earliest article date, stacked bar chart (recharts), colour by sentiment |
+| Coverage article list | ✅ Built | Paginated (5/page), sentiment dot, tier badge, external link |
 | Competitor comparison table | ✅ Built | User row highlighted |
 | Quick wins cards | ✅ Built | Action, time estimate, impact points, icon mapping |
-| PDF download | ✅ Built (PR open) | Puppeteer via `@sparticuz/chromium`, loading state, real A4 PDF — merge pending |
+| PDF download | ✅ Built & Merged | Puppeteer via `@sparticuz/chromium`, loading state, real A4 PDF |
 
 ---
 
@@ -47,7 +48,7 @@
 | `POST /api/audit` | ✅ Working | Starts durable workflow, returns `runId` |
 | `GET /api/audit/run/[runId]` | ✅ Working | Returns workflow status + metadata |
 | `GET /api/audit/readable/[runId]` | ✅ Working | SSE stream of step events to frontend |
-| `POST /api/pdf` | ✅ Built (PR open) | Server-side PDF via puppeteer-core + @sparticuz/chromium |
+| `POST /api/pdf` | ✅ Working | Server-side PDF via puppeteer-core + @sparticuz/chromium |
 
 ---
 
@@ -79,7 +80,7 @@
 | Signal | Brief | Implemented | Gap |
 |--------|-------|-------------|-----|
 | Instagram account linked | 2pts | ✅ 2pts | — |
-| Posted in last 14 days | 3pts | ✅ 3pts | Fixed — now uses `postedLast14Days` boolean |
+| Posted in last 14 days | 3pts | ✅ 3pts | Uses `postedLast14Days` boolean |
 | Reels in last 30 days | 3pts | ⚠️ hasReels | SERP snippet may not surface reels reliably |
 | Engagement above median | 4pts | ❌ 0pts | No borough benchmark — structurally deferred |
 | TikTok account exists | 3pts | ✅ 3pts (when present) | — |
@@ -87,8 +88,8 @@
 ### Press (25pts)
 | Signal | Brief | Implemented | Gap |
 |--------|-------|-------------|-----|
-| Any coverage in 12 months | 5pts | ✅ 5pts | — |
-| 3+ articles in 12 months | 5pts | ⚠️ unreliable | SERP scoped to Tier 1 only — undercounts real coverage |
+| Any coverage in 12 months | 5pts | ✅ 5pts | `anyCoverageIn12Months` boolean evaluated by Claude |
+| 3+ articles in 12 months | 5pts | ⚠️ improving | Now date-sorted + up to 100 results; still relies on Claude counting recent articles |
 | Tier 1 source | 5pts | ✅ 5pts | — |
 | Positive sentiment | 5pts | ✅ 5pts | — |
 | No negative in top 10 | 5pts | ✅ 5pts | — |
@@ -126,25 +127,25 @@ Bright Data returns 913KB of HTML; follower `og:description` appears past the 6,
 
 **Fix if SERP stops working**: Increase `unlockUrl` truncation limit to 12,000 chars for Instagram URLs.
 
-### Press Article Count — Tier 1 Filter Undercounts
-Press SERP is scoped to Guardian, Time Out, Evening Standard, Telegraph, Independent. Restaurants with coverage in Eater, Hot Dinners, local blogs, etc. will show fewer than their real article count. The "3+ articles" signal (5pts) is harder to earn than intended.
+### Press Article Recency — Established Restaurants Show Historical Coverage
+For restaurants with peak press at launch (e.g. Brat, 2018), SERP results still skew toward high-backlink old articles even with date-sort. The `anyCoverageIn12Months` signal depends on Claude correctly interpreting the snippet dates.
 
-**Potential fix**: Broaden the Google News query, then tier-classify all results rather than pre-filtering the query.
+**Mitigated by**: `&tbs=sbd:1` (sort by date) on both press queries + venue-suffix stripping so `"BRAT"` not `"BRAT Restaurant"` is matched.
 
 ### Engagement Rate — No Borough Benchmark
-The "engagement above borough median" signal (4pts) requires a reference dataset. No borough-level Instagram engagement data exists in the system. Always scores 0pts. Needs either a static lookup table or accumulated audit history in a database.
+The "engagement above borough median" signal (4pts) requires a reference dataset. No borough-level Instagram engagement data exists in the system. Always scores 0pts.
 
 ---
 
 ## Implemented vs V2 Roadmap
 
-### In MVP (implemented / PR open)
+### In MVP (shipped on main)
 - [x] Input form: restaurant name + postcode
 - [x] GBP audit via Bright Data SERP (claimed, photos inferred, hours, booking, 3-pack)
 - [x] Website scrape (HTML menu, booking widget, schema, allergen, about page)
 - [x] Instagram audit — `postedLast14Days`, `customerInstagramPosts`, followers, reels
-- [x] Press coverage — per-article data (title, source, date, URL, sentiment, tier)
-- [x] Coverage timeline chart — stacked bar by quarter, article list, sentiment colours
+- [x] Press coverage — dual SERP (Google News + site-filtered), date-sorted, up to 100 results, per-article source/date/url/sentiment/tier
+- [x] Coverage timeline chart — dynamic quarter range, stacked bar by sentiment, paginated article list (5/page)
 - [x] 5 nearest competitor benchmarks
 - [x] Score calculation (6 dimensions, 0–100, matches brief exactly)
 - [x] Claude-generated narrative + 3 quick wins
@@ -153,14 +154,13 @@ The "engagement above borough median" signal (4pts) requires a reference dataset
 - [x] Durable workflow — each step independently retryable (Vercel Workflow SDK)
 - [x] Structured outputs throughout — no `JSON.parse` fragility
 - [x] Error handling — `FatalError`, `RetryableError`, retry logic for 429s
-- [x] PDF generation — `POST /api/pdf`, Puppeteer A4, loading state on button *(PR open, not yet on main)*
+- [x] PDF generation — `POST /api/pdf`, Puppeteer A4, loading state on button
 
 ### Deferred to V2
 - [ ] TikTok audit (account, followers, video frequency, viral outliers)
 - [ ] TikTok UGC mentions (non-restaurant posts — 3pts of UGC score)
 - [ ] Reddit/community mentions (r/london, r/londonFood — 2pts of UGC score)
 - [ ] Engagement above borough median (4pts of Social score — needs benchmark data)
-- [ ] Press SERP broadening (unlock "3+ articles" signal for more restaurants)
 - [ ] Web Archive historical depth (3+ years of coverage timeline)
 - [ ] Weekly monitoring workflow with alerts (durable sleep/wake/diff)
 - [ ] White-label agency mode
@@ -169,22 +169,12 @@ The "engagement above borough median" signal (4pts) requires a reference dataset
 
 ---
 
-## Immediate Action
-
-| # | Action | Status |
-|---|--------|--------|
-| 1 | Merge PDF PR (`v0/generate-pdf-api-1239ab57`) | **Pending — merge on GitHub** |
-
-After that: all hackathon MVP scope items are shipped.
-
----
-
-## Next Steps (Post-MVP / Demo Prep)
+## Next Steps (Demo Prep)
 
 | Priority | What | Why |
 |----------|------|-----|
-| High | Run a live audit of **Brat (EC2A 3JL)** end-to-end | Validate the demo script works on a real restaurant |
-| High | Verify PDF renders correctly on the deployed URL | PDF route requires Node.js runtime + Chromium — confirm Vercel provisioned correctly |
-| Medium | Broaden press SERP query — remove `site:` filter, tier-classify results | Unlocks "3+ articles" signal; more realistic scores |
+| High | Run live audit of **Brat (EC2A 3JL)** on deployed Vercel URL | Validate demo script end-to-end on production |
+| High | Verify PDF renders correctly on deployed URL | PDF route requires Node.js runtime + Chromium — confirm Vercel provisioned correctly |
 | Medium | Test a restaurant with no Instagram / no website | Confirm graceful degradation and sensible scores at the edges |
-| Low | Add `anyCoverageIn12Months` date-awareness to press step | Currently no date filtering — old articles count the same as recent ones |
+| Medium | Add `anyCoverageIn12Months` date-awareness to press step | Currently Claude infers this from snippets; could be anchored to today's date explicitly |
+| Low | Consider Reddit SERP step for UGC mentions | 2pts — small effort, broadens earned presence signals |
