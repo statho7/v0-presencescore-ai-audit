@@ -1,6 +1,7 @@
 "use client"
 
-import { Download, RotateCcw, Sparkles } from "lucide-react"
+import { useState } from "react"
+import { Download, Loader2, RotateCcw, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { CompetitorTable } from "@/components/competitor-table"
 import { CoverageTimeline } from "@/components/coverage-timeline"
@@ -15,9 +16,35 @@ type ResultsViewProps = {
 }
 
 export function ResultsView({ result, onReset }: ResultsViewProps) {
-  function handleDownload() {
-    if (typeof window !== "undefined") {
-      window.print()
+  const [isDownloading, setIsDownloading] = useState(false)
+
+  async function handleDownload() {
+    if (isDownloading) return
+    setIsDownloading(true)
+    try {
+      const res = await fetch("/api/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ result }),
+      })
+
+      if (!res.ok) {
+        throw new Error(`PDF request failed with status ${res.status}`)
+      }
+
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `presencescore-${result.restaurantName}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error("[v0] PDF download failed:", err)
+    } finally {
+      setIsDownloading(false)
     }
   }
 
@@ -130,10 +157,20 @@ export function ResultsView({ result, onReset }: ResultsViewProps) {
             variant="outline"
             size="lg"
             onClick={handleDownload}
+            disabled={isDownloading}
             className="gap-2 bg-transparent"
           >
-            <Download className="h-4 w-4" />
-            Download PDF report
+            {isDownloading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Generating&hellip;
+              </>
+            ) : (
+              <>
+                <Download className="h-4 w-4" />
+                Download PDF report
+              </>
+            )}
           </Button>
           <p className="text-xs text-muted-foreground">
             Includes the full breakdown, narrative and a 30-day action plan.
