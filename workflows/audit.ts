@@ -596,9 +596,15 @@ function calculateScore(
     (social.engagementAboveMedian ? 4 : 0) +
     (social.tiktokExists ? 3 : 0);
 
+  const cutoff = new Date();
+  cutoff.setFullYear(cutoff.getFullYear() - 1);
+  const recentDates = (press.articleDates ?? []).filter(d => d && new Date(d) >= cutoff);
+  const anyCoverageIn12Months = recentDates.length > 0 || press.anyCoverageIn12Months;
+  const recentArticleCount = recentDates.length > 0 ? recentDates.length : press.articleCount;
+
   const pressScore =
-    (press.anyCoverageIn12Months ? 5 : 0) +
-    (press.articleCount >= 3 ? 5 : 0) +
+    (anyCoverageIn12Months ? 5 : 0) +
+    (recentArticleCount >= 3 ? 5 : 0) +
     (press.tier1Coverage ? 5 : 0) +
     (press.positiveSentiment ? 5 : 0) +
     (press.noNegativeInTopResults ? 5 : 0);
