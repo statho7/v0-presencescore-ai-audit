@@ -8,6 +8,7 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  serverExternalPackages: ["@sparticuz/chromium", "puppeteer-core"],
 };
 
 export default withWorkflow(nextConfig);
