@@ -6,14 +6,15 @@ import type { AuditResult } from "@/lib/audit-data"
 
 type ResultsViewClientProps = {
   result: AuditResult
+  cachedAt?: string
 }
 
-export function ResultsViewClient({ result }: ResultsViewClientProps) {
+export function ResultsViewClient({ result, cachedAt }: ResultsViewClientProps) {
   const router = useRouter()
 
   function handleReset() {
     router.push("/")
   }
 
-  return <ResultsView result={result} onReset={handleReset} />
+  return <ResultsView result={result} onReset={handleReset} cachedAt={cachedAt} />
 }

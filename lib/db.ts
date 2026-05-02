@@ -62,6 +62,28 @@ export async function auditExists(runId: string): Promise<boolean> {
   return rows.length > 0
 }
 
+/**
+ * Returns the most recent audit for a restaurant/postcode pair created within
+ * the last `withinDays` days, or null if none exists.
+ */
+export async function getRecentAuditByRestaurant(
+  restaurantName: string,
+  postcode: string,
+  withinDays = 7,
+): Promise<AuditRow | null> {
+  await ensureAuditsTable()
+  const rows = (await sql`
+    SELECT run_id, restaurant_name, postcode, result, created_at
+    FROM audits
+    WHERE LOWER(restaurant_name) = LOWER(${restaurantName})
+      AND LOWER(postcode) = LOWER(${postcode})
+      AND created_at >= NOW() - (${withinDays} || ' days')::interval
+    ORDER BY created_at DESC
+    LIMIT 1
+  `) as AuditRow[]
+  return rows[0] ?? null
+}
+
 export async function saveAudit(
   runId: string,
   restaurantName: string,
