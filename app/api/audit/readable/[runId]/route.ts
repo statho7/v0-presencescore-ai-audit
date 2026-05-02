@@ -1,0 +1,35 @@
+import { NextRequest } from "next/server";
+import { getRun } from "workflow/api";
+
+type Context = { params: Promise<{ runId: string }> };
+
+export async function GET(_req: NextRequest, { params }: Context) {
+  const { runId } = await params;
+
+  let run;
+  try {
+    run = await getRun(runId);
+  } catch {
+    return Response.json({ error: "Run not found" }, { status: 404 });
+  }
+
+  const readable = run.getReadable();
+  const encoder = new TextEncoder();
+  const sseStream = (readable as unknown as ReadableStream).pipeThrough(
+    new TransformStream({
+      transform(chunk, controller) {
+        const data = typeof chunk === "string" ? chunk : JSON.stringify(chunk);
+        controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+      },
+    }),
+  );
+
+  return new Response(sseStream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
