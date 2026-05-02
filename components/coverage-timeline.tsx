@@ -168,47 +168,60 @@ export function CoverageTimeline({ articles = [] }: CoverageTimelineProps) {
       {/* Article list with pagination */}
       <div className="rounded-xl border border-border bg-card/40 overflow-hidden">
         <div className="divide-y divide-border">
-          {paginated.map((article, i) => (
-            <a
-              key={i}
-              href={article.url ?? "#"}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-start justify-between gap-4 px-5 py-3.5 hover:bg-muted/30 transition-colors group"
-            >
-              <div className="flex items-start gap-3 min-w-0">
-                {/* Sentiment dot */}
-                <span
-                  className="mt-1 w-2 h-2 rounded-full flex-shrink-0"
-                  style={{ background: COLOR[article.sentiment] }}
-                />
-                <div className="min-w-0">
-                  <p className="text-sm text-foreground font-medium leading-snug truncate group-hover:text-primary transition-colors">
-                    {article.title}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {article.source}
-                    <span className="mx-1.5">·</span>
-                    {formatDate(article.date)}
-                    <span className="mx-1.5">·</span>
-                    <span
-                      className="font-mono text-[10px] px-1 py-0.5 rounded"
-                      style={{
-                        color: article.tier === "tier1" ? COLOR.positive : "oklch(0.68 0.01 270)",
-                        background: article.tier === "tier1" ? "oklch(0.78 0.16 155 / 0.12)" : "oklch(0.235 0.005 270)",
-                      }}
-                    >
-                      {TIER_LABEL[article.tier]}
-                    </span>
-                  </p>
+          {paginated.map((article, i) => {
+            const hasUrl = !!article.url;
+            const inner = (
+              <>
+                <div className="flex items-start gap-3 min-w-0">
+                  <span
+                    className="mt-1 w-2 h-2 rounded-full flex-shrink-0"
+                    style={{ background: COLOR[article.sentiment] }}
+                  />
+                  <div className="min-w-0">
+                    <p className={`text-sm text-foreground font-medium leading-snug truncate ${hasUrl ? "group-hover:text-primary transition-colors" : ""}`}>
+                      {article.title}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {article.source}
+                      <span className="mx-1.5">·</span>
+                      {formatDate(article.date)}
+                      <span className="mx-1.5">·</span>
+                      <span
+                        className="font-mono text-[10px] px-1 py-0.5 rounded"
+                        style={{
+                          color: article.tier === "tier1" ? COLOR.positive : "oklch(0.68 0.01 270)",
+                          background: article.tier === "tier1" ? "oklch(0.78 0.16 155 / 0.12)" : "oklch(0.235 0.005 270)",
+                        }}
+                      >
+                        {TIER_LABEL[article.tier]}
+                      </span>
+                    </p>
+                  </div>
                 </div>
+                {hasUrl && (
+                  <ExternalLink
+                    size={14}
+                    className="flex-shrink-0 mt-1 text-muted-foreground group-hover:text-primary transition-colors"
+                  />
+                )}
+              </>
+            );
+            return hasUrl ? (
+              <a
+                key={i}
+                href={article.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-start justify-between gap-4 px-5 py-3.5 hover:bg-muted/30 transition-colors group"
+              >
+                {inner}
+              </a>
+            ) : (
+              <div key={i} className="flex items-start justify-between gap-4 px-5 py-3.5">
+                {inner}
               </div>
-              <ExternalLink
-                size={14}
-                className="flex-shrink-0 mt-1 text-muted-foreground group-hover:text-primary transition-colors"
-              />
-            </a>
-          ))}
+            );
+          })}
         </div>
 
         {/* Pagination controls */}
