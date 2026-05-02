@@ -22,8 +22,8 @@ const BD_API = "https://api.brightdata.com/request";
 async function serpSearch(query: string, news = false): Promise<string> {
   console.log(`[serpSearch] query="${query}" news=${news}`);
   const base = news
-    ? `https://www.google.com/search?q=${encodeURIComponent(query)}&gl=gb&hl=en&tbm=nws&num=10`
-    : `https://www.google.com/search?q=${encodeURIComponent(query)}&gl=gb&hl=en&num=10`;
+    ? `https://www.google.com/search?q=${encodeURIComponent(query)}&gl=gb&hl=en&tbm=nws&num=100`
+    : `https://www.google.com/search?q=${encodeURIComponent(query)}&gl=gb&hl=en&num=100`;
   const res = await fetch(BD_API, {
     method: "POST",
     headers: {
