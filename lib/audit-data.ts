@@ -72,6 +72,14 @@ export type Competitor = {
   isYou?: boolean
 }
 
+export type CoverageArticle = {
+  title: string
+  source: string
+  date: string
+  sentiment: "positive" | "neutral" | "negative"
+  tier: "tier1" | "tier2" | "tier3"
+}
+
 export type AuditResult = {
   restaurantName: string
   postcode: string
@@ -80,6 +88,7 @@ export type AuditResult = {
   quickWins: QuickWin[]
   narrative: string[]
   competitors: Competitor[]
+  articles: CoverageArticle[]
 }
 
 export function generateAuditResult(
@@ -208,6 +217,43 @@ export function generateAuditResult(
         gbpPhotos: 31,
         pressMentions: 3,
         bookingLink: false,
+      },
+    ],
+    articles: [
+      {
+        title: "The best new restaurant openings in London",
+        source: "Time Out",
+        date: "2024-09-15",
+        sentiment: "positive",
+        tier: "tier1",
+      },
+      {
+        title: "Where to eat in Mayfair right now",
+        source: "Evening Standard",
+        date: "2023-11-03",
+        sentiment: "positive",
+        tier: "tier1",
+      },
+      {
+        title: "London's hidden dining gems",
+        source: "Eater London",
+        date: "2024-03-22",
+        sentiment: "neutral",
+        tier: "tier2",
+      },
+      {
+        title: "A tour of Mayfair's restaurant scene",
+        source: "Hot Dinners",
+        date: "2023-06-10",
+        sentiment: "positive",
+        tier: "tier2",
+      },
+      {
+        title: "Review: dinner in the heart of Mayfair",
+        source: "Square Meal",
+        date: "2024-01-18",
+        sentiment: "neutral",
+        tier: "tier3",
       },
     ],
   }

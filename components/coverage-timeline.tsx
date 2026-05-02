@@ -1,15 +1,8 @@
 "use client"
 
 import { useMemo } from "react"
-import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell, Tooltip } from "recharts"
-
-type CoverageArticle = {
-  title: string
-  source: string
-  date: string
-  sentiment: "positive" | "neutral" | "negative"
-  tier: "tier1" | "tier2" | "tier3"
-}
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts"
+import type { CoverageArticle } from "@/lib/audit-data"
 
 type CoverageTimelineProps = { articles: CoverageArticle[] }
 
