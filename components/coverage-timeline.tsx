@@ -1,8 +1,8 @@
 "use client"
 
-import { useMemo } from "react"
-import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell } from "recharts"
-import { ExternalLink } from "lucide-react"
+import { useMemo, useState } from "react"
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts"
+import { ExternalLink, ChevronLeft, ChevronRight } from "lucide-react"
 import type { CoverageArticle } from "@/lib/audit-data"
 
 // Hardcoded to match the dark theme oklch tokens
@@ -18,21 +18,22 @@ const TIER_LABEL: Record<CoverageArticle["tier"], string> = {
   tier3: "Tier 3",
 }
 
+const PAGE_SIZE = 5
+
 type CoverageTimelineProps = { articles: CoverageArticle[] }
 
-function buildQuarters(articles: CoverageArticle[]) {
+function buildLast8Quarters() {
   const now = new Date()
   const endYear = now.getFullYear()
   const endQ = Math.ceil((now.getMonth() + 1) / 3)
 
-  // Find earliest article date; fall back to 2 years ago
-  const earliest = articles.reduce<Date>((min, a) => {
-    const d = new Date(a.date)
-    return d < min ? d : min
-  }, new Date(now.getFullYear() - 2, now.getMonth(), 1))
-
-  let startYear = earliest.getFullYear()
-  let startQ = Math.ceil((earliest.getMonth() + 1) / 3)
+  // Go back 7 more quarters to build exactly 8
+  let startQ = endQ - 7
+  let startYear = endYear
+  while (startQ < 1) {
+    startQ += 4
+    startYear--
+  }
 
   const quarters: { label: string; year: number; q: number }[] = []
   let year = startYear
@@ -46,6 +47,7 @@ function buildQuarters(articles: CoverageArticle[]) {
 }
 
 function formatDate(iso: string) {
+  if (!iso) return "Date unknown"
   const d = new Date(iso)
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
 }
@@ -68,11 +70,14 @@ function CustomTooltip({ active, payload, label }: any) {
 }
 
 export function CoverageTimeline({ articles = [] }: CoverageTimelineProps) {
-  const quarters = useMemo(() => buildQuarters(articles), [articles])
+  const [page, setPage] = useState(0)
+
+  const quarters = useMemo(() => buildLast8Quarters(), [])
 
   const data = useMemo(() => {
     return quarters.map(({ label, year, q }) => {
       const bucket = articles.filter((a) => {
+        if (!a.date) return false
         const d = new Date(a.date)
         return d.getFullYear() === year && Math.ceil((d.getMonth() + 1) / 3) === q
       })
@@ -94,6 +99,9 @@ export function CoverageTimeline({ articles = [] }: CoverageTimelineProps) {
     () => [...articles].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
     [articles]
   )
+
+  const totalPages = Math.ceil(sorted.length / PAGE_SIZE)
+  const paginated = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
 
   if (articles.length === 0) {
     return (
@@ -128,7 +136,7 @@ export function CoverageTimeline({ articles = [] }: CoverageTimelineProps) {
           ))}
         </div>
 
-        {/* Bar chart */}
+        {/* Bar chart — fixed 8-quarter window */}
         <ResponsiveContainer width="100%" height={180}>
           <BarChart data={data} barSize={24} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
             <XAxis
@@ -152,49 +160,91 @@ export function CoverageTimeline({ articles = [] }: CoverageTimelineProps) {
         </ResponsiveContainer>
       </div>
 
-      {/* Article list */}
-      <div className="rounded-xl border border-border bg-card/40 divide-y divide-border overflow-hidden">
-        {sorted.map((article, i) => (
-          <a
-            key={i}
-            href={article.url ?? "#"}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-start justify-between gap-4 px-5 py-3.5 hover:bg-muted/30 transition-colors group"
-          >
-            <div className="flex items-start gap-3 min-w-0">
-              {/* Sentiment dot */}
-              <span
-                className="mt-1 w-2 h-2 rounded-full flex-shrink-0"
-                style={{ background: COLOR[article.sentiment] }}
-              />
-              <div className="min-w-0">
-                <p className="text-sm text-foreground font-medium leading-snug truncate group-hover:text-primary transition-colors">
-                  {article.title}
-                </p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {article.source}
-                  <span className="mx-1.5">·</span>
-                  {formatDate(article.date)}
-                  <span className="mx-1.5">·</span>
-                  <span
-                    className="font-mono text-[10px] px-1 py-0.5 rounded"
-                    style={{
-                      color: article.tier === "tier1" ? COLOR.positive : "oklch(0.68 0.01 270)",
-                      background: article.tier === "tier1" ? "oklch(0.78 0.16 155 / 0.12)" : "oklch(0.235 0.005 270)",
-                    }}
-                  >
-                    {TIER_LABEL[article.tier]}
-                  </span>
-                </p>
+      {/* Article list with pagination */}
+      <div className="rounded-xl border border-border bg-card/40 overflow-hidden">
+        <div className="divide-y divide-border">
+          {paginated.map((article, i) => (
+            <a
+              key={i}
+              href={article.url ?? "#"}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-start justify-between gap-4 px-5 py-3.5 hover:bg-muted/30 transition-colors group"
+            >
+              <div className="flex items-start gap-3 min-w-0">
+                {/* Sentiment dot */}
+                <span
+                  className="mt-1 w-2 h-2 rounded-full flex-shrink-0"
+                  style={{ background: COLOR[article.sentiment] }}
+                />
+                <div className="min-w-0">
+                  <p className="text-sm text-foreground font-medium leading-snug truncate group-hover:text-primary transition-colors">
+                    {article.title}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {article.source}
+                    <span className="mx-1.5">·</span>
+                    {formatDate(article.date)}
+                    <span className="mx-1.5">·</span>
+                    <span
+                      className="font-mono text-[10px] px-1 py-0.5 rounded"
+                      style={{
+                        color: article.tier === "tier1" ? COLOR.positive : "oklch(0.68 0.01 270)",
+                        background: article.tier === "tier1" ? "oklch(0.78 0.16 155 / 0.12)" : "oklch(0.235 0.005 270)",
+                      }}
+                    >
+                      {TIER_LABEL[article.tier]}
+                    </span>
+                  </p>
+                </div>
               </div>
+              <ExternalLink
+                size={14}
+                className="flex-shrink-0 mt-1 text-muted-foreground group-hover:text-primary transition-colors"
+              />
+            </a>
+          ))}
+        </div>
+
+        {/* Pagination controls */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between border-t border-border px-5 py-3">
+            <span className="font-mono text-xs text-muted-foreground">
+              {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, sorted.length)} of {sorted.length}
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                disabled={page === 0}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
+                aria-label="Previous page"
+              >
+                <ChevronLeft size={14} />
+              </button>
+              {Array.from({ length: totalPages }, (_, i) => (
+                <button
+                  key={i}
+                  onClick={() => setPage(i)}
+                  className="flex h-7 w-7 items-center justify-center rounded-md font-mono text-xs transition-colors hover:bg-muted/50"
+                  style={{
+                    background: i === page ? "oklch(0.78 0.16 155 / 0.15)" : undefined,
+                    color: i === page ? COLOR.positive : undefined,
+                  }}
+                >
+                  {i + 1}
+                </button>
+              ))}
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                disabled={page === totalPages - 1}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
+                aria-label="Next page"
+              >
+                <ChevronRight size={14} />
+              </button>
             </div>
-            <ExternalLink
-              size={14}
-              className="flex-shrink-0 mt-1 text-muted-foreground group-hover:text-primary transition-colors"
-            />
-          </a>
-        ))}
+          </div>
+        )}
       </div>
     </div>
   )
