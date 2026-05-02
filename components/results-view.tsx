@@ -1,32 +1,29 @@
-"use client"
+"use client";
 
-import { Download, RotateCcw, Sparkles } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { CompetitorTable } from "@/components/competitor-table"
-import { CoverageTimeline } from "@/components/coverage-timeline"
-import { QuickWins } from "@/components/quick-wins"
-import { ScoreBars } from "@/components/score-bars"
-import { ScoreDial } from "@/components/score-dial"
-import type { AuditResult } from "@/lib/audit-data"
+import { Download, RotateCcw, Sparkles } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { CompetitorTable } from "@/components/competitor-table";
+import { CoverageTimeline } from "@/components/coverage-timeline";
+import { QuickWins } from "@/components/quick-wins";
+import { ScoreBars } from "@/components/score-bars";
+import { ScoreDial } from "@/components/score-dial";
+import type { AuditResult } from "@/lib/audit-data";
 
 type ResultsViewProps = {
-  result: AuditResult
-  onReset: () => void
-}
+  result: AuditResult;
+  onReset: () => void;
+};
 
 export function ResultsView({ result, onReset }: ResultsViewProps) {
   function handleDownload() {
-    window.print()
+    window.print();
   }
 
   return (
     <div className="relative flex min-h-screen flex-col">
       <header className="sticky top-0 z-10 border-b border-border/60 bg-background/80 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4 md:px-10">
-          <button
-            onClick={onReset}
-            className="flex items-center gap-2 text-sm transition-opacity hover:opacity-80"
-          >
+          <button onClick={onReset} className="flex items-center gap-2 text-sm transition-opacity hover:opacity-80">
             <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/15 ring-1 ring-primary/30">
               <Sparkles className="h-4 w-4 text-primary" />
             </div>
@@ -47,11 +44,7 @@ export function ResultsView({ result, onReset }: ResultsViewProps) {
       <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-10 md:px-10 md:py-14">
         {/* Score dial section */}
         <section className="rounded-2xl border border-border bg-card/40 p-6 md:p-10">
-          <ScoreDial
-            score={result.totalScore}
-            restaurantName={result.restaurantName}
-            postcode={result.postcode}
-          />
+          <ScoreDial score={result.totalScore} restaurantName={result.restaurantName} postcode={result.postcode} />
         </section>
 
         {/* Dimension bars */}
@@ -102,9 +95,7 @@ export function ResultsView({ result, onReset }: ResultsViewProps) {
               {result.narrative
                 .filter((para) => !para.startsWith("#"))
                 .map((para, idx) => (
-                  <p key={idx}>
-                    {para.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1")}
-                  </p>
+                  <p key={idx}>{para.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1")}</p>
                 ))}
             </div>
           </div>
@@ -124,12 +115,7 @@ export function ResultsView({ result, onReset }: ResultsViewProps) {
 
         {/* Download */}
         <section className="mt-12 flex flex-col items-start gap-3 border-t border-border/60 pt-8">
-          <Button
-            variant="outline"
-            size="lg"
-            onClick={handleDownload}
-            className="gap-2 bg-transparent"
-          >
+          <Button variant="outline" size="lg" onClick={handleDownload} className="gap-2 bg-transparent">
             <Download className="h-4 w-4" />
             Download PDF report
           </Button>
@@ -144,31 +130,19 @@ export function ResultsView({ result, onReset }: ResultsViewProps) {
           <span>
             Audit generated for {result.restaurantName} ({result.postcode})
           </span>
-          <span className="font-mono">PresenceScore v1.0</span>
+          <span className="font-mono">PresenceScore v0.1</span>
         </div>
       </footer>
     </div>
-  )
+  );
 }
 
-function SectionHeader({
-  eyebrow,
-  title,
-  description,
-}: {
-  eyebrow: string
-  title: string
-  description: string
-}) {
+function SectionHeader({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="font-mono text-xs uppercase tracking-widest text-primary">
-        {eyebrow}
-      </span>
-      <h2 className="text-balance text-2xl font-semibold tracking-tight md:text-3xl">
-        {title}
-      </h2>
+      <span className="font-mono text-xs uppercase tracking-widest text-primary">{eyebrow}</span>
+      <h2 className="text-balance text-2xl font-semibold tracking-tight md:text-3xl">{title}</h2>
       <p className="text-sm text-muted-foreground">{description}</p>
     </div>
-  )
+  );
 }
