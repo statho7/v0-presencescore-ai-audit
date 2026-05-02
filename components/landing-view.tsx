@@ -8,12 +8,15 @@ import { Label } from "@/components/ui/label"
 
 type LandingViewProps = {
   onSubmit: (restaurantName: string, postcode: string) => void
+  error?: string | null
 }
 
-export function LandingView({ onSubmit }: LandingViewProps) {
+export function LandingView({ onSubmit, error: apiError }: LandingViewProps) {
   const [name, setName] = useState("")
   const [postcode, setPostcode] = useState("")
   const [error, setError] = useState<string | null>(null)
+
+  const displayError = apiError ?? error
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -115,12 +118,12 @@ export function LandingView({ onSubmit }: LandingViewProps) {
               </div>
             </div>
 
-            {error && (
+            {displayError && (
               <p
                 role="alert"
                 className="mt-3 text-left text-sm text-destructive"
               >
-                {error}
+                {displayError}
               </p>
             )}
 

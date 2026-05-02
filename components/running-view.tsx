@@ -1,40 +1,74 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Check, Loader2 } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { Check, Loader2, AlertCircle } from "lucide-react"
 import { AUDIT_STEPS } from "@/lib/audit-data"
+import type { AuditResult } from "@/lib/audit-data"
+import type { AuditEvent } from "@/workflows/audit"
 import { cn } from "@/lib/utils"
+
+type StepStatus = "pending" | "running" | "complete" | "error"
 
 type RunningViewProps = {
   restaurantName: string
   postcode: string
-  onComplete: () => void
+  runId: string
+  onComplete: (result: AuditResult) => void
 }
 
-const STEP_DURATION_MS = 850
+export function RunningView({ restaurantName, postcode, runId, onComplete }: RunningViewProps) {
+  const [stepStatuses, setStepStatuses] = useState<Record<string, StepStatus>>({})
+  const [stepLogs, setStepLogs] = useState<Record<string, string>>({})
+  const [fatalError, setFatalError] = useState<string | null>(null)
+  const onCompleteRef = useRef(onComplete)
+  onCompleteRef.current = onComplete
 
-export function RunningView({
-  restaurantName,
-  postcode,
-  onComplete,
-}: RunningViewProps) {
-  const [currentStep, setCurrentStep] = useState(0)
+  const completedCount = Object.values(stepStatuses).filter((s) => s === "complete").length
+  const progress = Math.round((completedCount / AUDIT_STEPS.length) * 100)
 
   useEffect(() => {
-    if (currentStep >= AUDIT_STEPS.length) {
-      const t = setTimeout(onComplete, 600)
-      return () => clearTimeout(t)
-    }
-    const t = setTimeout(() => {
-      setCurrentStep((s) => s + 1)
-    }, STEP_DURATION_MS)
-    return () => clearTimeout(t)
-  }, [currentStep, onComplete])
+    const es = new EventSource(`/api/audit/readable/${runId}`)
 
-  const progress = Math.min(
-    100,
-    Math.round((currentStep / AUDIT_STEPS.length) * 100),
-  )
+    es.onmessage = (e) => {
+      let event: AuditEvent
+      try {
+        event = JSON.parse(e.data)
+      } catch {
+        return
+      }
+
+      if (event.type === "step_start") {
+        setStepStatuses((prev) => ({ ...prev, [event.stepId]: "running" }))
+      } else if (event.type === "step_done") {
+        setStepStatuses((prev) => ({ ...prev, [event.stepId]: "complete" }))
+        setStepLogs((prev) => ({ ...prev, [event.stepId]: event.log }))
+      } else if (event.type === "step_error") {
+        setStepStatuses((prev) => ({ ...prev, [event.stepId]: "error" }))
+        setStepLogs((prev) => ({ ...prev, [event.stepId]: event.error }))
+      } else if (event.type === "done") {
+        es.close()
+        onCompleteRef.current(event.result)
+      }
+    }
+
+    es.onerror = () => {
+      es.close()
+      setFatalError("Connection to audit server lost. Please try again.")
+    }
+
+    return () => es.close()
+  }, [runId])
+
+  if (fatalError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-6">
+        <div className="flex flex-col items-center gap-4 text-center">
+          <AlertCircle className="h-10 w-10 text-destructive" />
+          <p className="text-sm text-muted-foreground">{fatalError}</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="relative flex min-h-screen flex-col">
@@ -57,7 +91,7 @@ export function RunningView({
               <span className="text-primary">{restaurantName}</span>
             </h1>
             <p className="mt-2 font-mono text-sm text-muted-foreground">
-              {postcode} · 8 checks
+              {postcode} · {AUDIT_STEPS.length} checks
             </p>
 
             <div className="mt-6 h-1 w-full max-w-sm overflow-hidden rounded-full bg-secondary">
@@ -70,28 +104,22 @@ export function RunningView({
                 aria-valuemax={100}
               />
             </div>
-            <span className="mt-2 font-mono text-xs text-muted-foreground">
-              {progress}%
-            </span>
+            <span className="mt-2 font-mono text-xs text-muted-foreground">{progress}%</span>
           </div>
 
           <ol className="space-y-2">
             {AUDIT_STEPS.map((step, idx) => {
-              const status =
-                idx < currentStep
-                  ? "complete"
-                  : idx === currentStep
-                    ? "running"
-                    : "pending"
+              const status = stepStatuses[step.id] ?? "pending"
+              const log = stepLogs[step.id]
               return (
                 <li
                   key={step.id}
                   className={cn(
                     "rounded-xl border bg-card/40 p-4 transition-all duration-300",
                     status === "pending" && "border-border/50 opacity-60",
-                    status === "running" &&
-                      "border-primary/40 bg-primary/[0.04] shadow-lg shadow-primary/5",
+                    status === "running" && "border-primary/40 bg-primary/[0.04] shadow-lg shadow-primary/5",
                     status === "complete" && "border-border",
+                    status === "error" && "border-destructive/40",
                   )}
                 >
                   <div className="flex items-center gap-3">
@@ -102,22 +130,20 @@ export function RunningView({
                         status === "pending" && "text-muted-foreground",
                         status === "running" && "text-foreground",
                         status === "complete" && "text-foreground",
+                        status === "error" && "text-destructive",
                       )}
                     >
                       {step.label}
-                      {status === "running" && (
-                        <span className="ml-1 text-primary">…</span>
-                      )}
+                      {status === "running" && <span className="ml-1 text-primary">…</span>}
                     </span>
                     <span className="font-mono text-xs text-muted-foreground">
-                      {String(idx + 1).padStart(2, "0")}/08
+                      {String(idx + 1).padStart(2, "0")}/{String(AUDIT_STEPS.length).padStart(2, "0")}
                     </span>
                   </div>
 
-                  {status === "complete" && (
+                  {(status === "complete" || status === "error") && log && (
                     <p className="mt-2 pl-8 font-mono text-xs leading-relaxed text-muted-foreground">
-                      {"› "}
-                      {step.log}
+                      {"› "}{log}
                     </p>
                   )}
                 </li>
@@ -130,11 +156,7 @@ export function RunningView({
   )
 }
 
-function StepIcon({
-  status,
-}: {
-  status: "pending" | "running" | "complete"
-}) {
+function StepIcon({ status }: { status: StepStatus }) {
   if (status === "complete") {
     return (
       <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
@@ -146,6 +168,13 @@ function StepIcon({
     return (
       <div className="flex h-5 w-5 shrink-0 items-center justify-center">
         <Loader2 className="h-4 w-4 animate-spin text-primary" />
+      </div>
+    )
+  }
+  if (status === "error") {
+    return (
+      <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-destructive/20">
+        <AlertCircle className="h-3 w-3 text-destructive" />
       </div>
     )
   }
