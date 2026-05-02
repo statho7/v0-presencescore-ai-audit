@@ -1,0 +1,157 @@
+"use client"
+
+import { useEffect, useState } from "react"
+import { Check, Loader2 } from "lucide-react"
+import { AUDIT_STEPS } from "@/lib/audit-data"
+import { cn } from "@/lib/utils"
+
+type RunningViewProps = {
+  restaurantName: string
+  postcode: string
+  onComplete: () => void
+}
+
+const STEP_DURATION_MS = 850
+
+export function RunningView({
+  restaurantName,
+  postcode,
+  onComplete,
+}: RunningViewProps) {
+  const [currentStep, setCurrentStep] = useState(0)
+
+  useEffect(() => {
+    if (currentStep >= AUDIT_STEPS.length) {
+      const t = setTimeout(onComplete, 600)
+      return () => clearTimeout(t)
+    }
+    const t = setTimeout(() => {
+      setCurrentStep((s) => s + 1)
+    }, STEP_DURATION_MS)
+    return () => clearTimeout(t)
+  }, [currentStep, onComplete])
+
+  const progress = Math.min(
+    100,
+    Math.round((currentStep / AUDIT_STEPS.length) * 100),
+  )
+
+  return (
+    <div className="relative flex min-h-screen flex-col">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
+      >
+        <div className="absolute left-1/2 top-1/3 h-[500px] w-[700px] -translate-x-1/2 rounded-full bg-primary/8 blur-3xl" />
+      </div>
+
+      <main className="flex flex-1 items-center justify-center px-6 py-12 md:px-10">
+        <div className="w-full max-w-2xl">
+          <div className="mb-8 flex flex-col items-center text-center">
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-3 py-1 font-mono text-xs text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin text-primary" />
+              Auditing
+            </div>
+            <h1 className="text-balance text-2xl font-semibold tracking-tight md:text-3xl">
+              Running PresenceScore for{" "}
+              <span className="text-primary">{restaurantName}</span>
+            </h1>
+            <p className="mt-2 font-mono text-sm text-muted-foreground">
+              {postcode} · 8 checks
+            </p>
+
+            <div className="mt-6 h-1 w-full max-w-sm overflow-hidden rounded-full bg-secondary">
+              <div
+                className="h-full rounded-full bg-primary transition-all duration-500 ease-out"
+                style={{ width: `${progress}%` }}
+                role="progressbar"
+                aria-valuenow={progress}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              />
+            </div>
+            <span className="mt-2 font-mono text-xs text-muted-foreground">
+              {progress}%
+            </span>
+          </div>
+
+          <ol className="space-y-2">
+            {AUDIT_STEPS.map((step, idx) => {
+              const status =
+                idx < currentStep
+                  ? "complete"
+                  : idx === currentStep
+                    ? "running"
+                    : "pending"
+              return (
+                <li
+                  key={step.id}
+                  className={cn(
+                    "rounded-xl border bg-card/40 p-4 transition-all duration-300",
+                    status === "pending" && "border-border/50 opacity-60",
+                    status === "running" &&
+                      "border-primary/40 bg-primary/[0.04] shadow-lg shadow-primary/5",
+                    status === "complete" && "border-border",
+                  )}
+                >
+                  <div className="flex items-center gap-3">
+                    <StepIcon status={status} />
+                    <span
+                      className={cn(
+                        "flex-1 text-sm md:text-base",
+                        status === "pending" && "text-muted-foreground",
+                        status === "running" && "text-foreground",
+                        status === "complete" && "text-foreground",
+                      )}
+                    >
+                      {step.label}
+                      {status === "running" && (
+                        <span className="ml-1 text-primary">…</span>
+                      )}
+                    </span>
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {String(idx + 1).padStart(2, "0")}/08
+                    </span>
+                  </div>
+
+                  {status === "complete" && (
+                    <p className="mt-2 pl-8 font-mono text-xs leading-relaxed text-muted-foreground">
+                      {"› "}
+                      {step.log}
+                    </p>
+                  )}
+                </li>
+              )
+            })}
+          </ol>
+        </div>
+      </main>
+    </div>
+  )
+}
+
+function StepIcon({
+  status,
+}: {
+  status: "pending" | "running" | "complete"
+}) {
+  if (status === "complete") {
+    return (
+      <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+        <Check className="h-3 w-3" strokeWidth={3} />
+      </div>
+    )
+  }
+  if (status === "running") {
+    return (
+      <div className="flex h-5 w-5 shrink-0 items-center justify-center">
+        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+      </div>
+    )
+  }
+  return (
+    <div className="flex h-5 w-5 shrink-0 items-center justify-center">
+      <div className="h-2 w-2 rounded-full bg-muted-foreground/40" />
+    </div>
+  )
+}

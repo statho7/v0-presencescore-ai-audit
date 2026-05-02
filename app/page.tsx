@@ -1,16 +1,52 @@
+"use client"
+
+import { useState } from "react"
+import { LandingView } from "@/components/landing-view"
+import { ResultsView } from "@/components/results-view"
+import { RunningView } from "@/components/running-view"
+import { generateAuditResult, type AuditResult } from "@/lib/audit-data"
+
+type Stage = "landing" | "running" | "results"
+
 export default function Home() {
-  return (
-    <div className="flex min-h-screen items-center justify-center font-sans">
-      <main className="flex w-full max-w-3xl flex-col items-center gap-8 px-6 py-16 text-center sm:items-start sm:text-left">
-        <div className="flex flex-col gap-4">
-          <h1 className="text-4xl font-bold tracking-tight">
-            PresenceScore
-          </h1>
-          <p className="max-w-md text-lg text-muted-foreground">
-            To get started, send a prompt or modify this page directly.
-          </p>
-        </div>
-      </main>
-    </div>
-  );
+  const [stage, setStage] = useState<Stage>("landing")
+  const [restaurantName, setRestaurantName] = useState("")
+  const [postcode, setPostcode] = useState("")
+  const [result, setResult] = useState<AuditResult | null>(null)
+
+  function handleSubmit(name: string, code: string) {
+    setRestaurantName(name)
+    setPostcode(code)
+    setStage("running")
+  }
+
+  function handleAuditComplete() {
+    setResult(generateAuditResult(restaurantName, postcode))
+    setStage("results")
+  }
+
+  function handleReset() {
+    setStage("landing")
+    setResult(null)
+  }
+
+  if (stage === "landing") {
+    return <LandingView onSubmit={handleSubmit} />
+  }
+
+  if (stage === "running") {
+    return (
+      <RunningView
+        restaurantName={restaurantName}
+        postcode={postcode}
+        onComplete={handleAuditComplete}
+      />
+    )
+  }
+
+  if (stage === "results" && result) {
+    return <ResultsView result={result} onReset={handleReset} />
+  }
+
+  return null
 }
