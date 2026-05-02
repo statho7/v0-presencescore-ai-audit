@@ -441,6 +441,7 @@ type PressAudit = {
   positiveSentiment: boolean;
   noNegativeInTopResults: boolean;
   articleTitles: string[];
+  articleUrls: string[];
 };
 
 async function auditPress(identity: Identity): Promise<PressAudit> {
@@ -459,6 +460,7 @@ async function auditPress(identity: Identity): Promise<PressAudit> {
     positiveSentiment: z.boolean(),
     noNegativeInTopResults: z.boolean(),
     articleTitles: z.array(z.string()),
+    articleUrls: z.array(z.string()),
   });
 
   const audit = await askStructured("press", `Analyse press coverage for a specific London restaurant.
@@ -472,7 +474,9 @@ Rules:
 - tier1Coverage: true if Guardian, Time Out, Evening Standard, Telegraph, or Independent
 - positiveSentiment: true if coverage tone is positive or mixed-positive
 - noNegativeInTopResults: true if no clearly negative reviews appear
-- If no relevant articles found, use articleCount: 0 and all false`, pressSchema);
+- If no relevant articles found, use articleCount: 0 and all false
+- articleTitles: clean article title only (no source suffix or description)
+- articleUrls: the direct URL for each article in the same order as articleTitles; use empty string if unknown`, pressSchema);
   console.log(`[auditPress] parsed audit=${JSON.stringify(audit)}`);
 
   const log = `${audit.articleCount} article${audit.articleCount !== 1 ? "s" : ""} found · ${audit.tier1Coverage ? "Tier-1 coverage" : "No tier-1"} · ${audit.positiveSentiment ? "Positive sentiment" : "Mixed/negative sentiment"}`;
@@ -718,27 +722,46 @@ Separate the paragraphs from the JSON with the exact delimiter: ---JSON---`);
   await emit({ type: "step_done", stepId: "recommendations", log: `${quickWins.length} quick wins identified · Narrative generated` });
   console.log(`[generateReport] DONE total=${total} quickWins=${quickWins.length}`);
 
-  // Parse articleTitles strings (format: "Title (Source, DD Mon YYYY)") into CoverageArticle objects
+  // Parse articleTitles into CoverageArticle objects
+  // Real format examples:
+  //   "The Twenty Two Hotel Review (The Telegraph) - mentions Mercato Mayfair..."
+  //   "Where to eat in Mayfair (Time Out, April 2024)"
+  //   "Clean title only" (when AI follows new instructions)
   const TIER1_SOURCES = ["guardian", "time out", "timeout", "evening standard", "telegraph", "independent"];
-  const articles: CoverageArticle[] = press.articleTitles.map((title): CoverageArticle => {
-    // Extract source and date from trailing "(Source, Date)" pattern
-    const match = title.match(/\(([^,]+),\s*([^)]+)\)\s*$/);
-    const source = match ? match[1].trim() : "Unknown";
-    const dateStr = match ? match[2].trim() : "";
+  const urls: string[] = press.articleUrls ?? [];
 
-    // Parse the date — handle formats like "17 Nov 2022", "1 Sept 2016", "29 Oct 2025"
+  const articles: CoverageArticle[] = press.articleTitles.map((raw, idx): CoverageArticle => {
+    // Strip trailing " - description" note added by the AI
+    const withoutNote = raw.replace(/\s*-\s*[^(]*$/, "").trim();
+
+    // Extract "(Source)" or "(Source, Date)" from end of remaining string
+    const parenMatch = withoutNote.match(/\(([^)]+)\)\s*$/);
+    let cleanTitle = parenMatch ? withoutNote.slice(0, withoutNote.lastIndexOf("(")).trim() : withoutNote;
+    const parenContent = parenMatch ? parenMatch[1] : "";
+
+    // Split paren content into source and optional date part
+    const parenParts = parenContent.split(",").map((p) => p.trim());
+    const source = parenParts[0] || "Unknown";
+    const dateStr = parenParts.slice(1).join(" ").trim();
+
+    // Try to parse the date; fall back to today
     const parsed = dateStr ? new Date(dateStr) : null;
-    const isoDate = parsed && !isNaN(parsed.getTime())
-      ? parsed.toISOString().slice(0, 10)
-      : new Date().toISOString().slice(0, 10);
+    const isoDate =
+      parsed && !isNaN(parsed.getTime())
+        ? parsed.toISOString().slice(0, 10)
+        : new Date().toISOString().slice(0, 10);
+
+    // If no parens at all, the whole string is the title
+    if (!parenMatch) cleanTitle = withoutNote;
 
     const tier: CoverageArticle["tier"] = TIER1_SOURCES.some((s) =>
       source.toLowerCase().includes(s)
     ) ? "tier1" : "tier2";
 
     const sentiment: CoverageArticle["sentiment"] = press.positiveSentiment ? "positive" : "neutral";
+    const url = urls[idx] && urls[idx].startsWith("http") ? urls[idx] : undefined;
 
-    return { title: match ? title.slice(0, title.lastIndexOf("(")).trim() : title, source, date: isoDate, sentiment, tier };
+    return { title: cleanTitle || raw, source, date: isoDate, url, sentiment, tier };
   });
   console.log(`[generateReport] articles parsed=${articles.length}`);
 

@@ -76,6 +76,7 @@ export type CoverageArticle = {
   title: string
   source: string
   date: string
+  url?: string
   sentiment: "positive" | "neutral" | "negative"
   tier: "tier1" | "tier2" | "tier3"
 }
