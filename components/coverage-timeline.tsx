@@ -23,7 +23,7 @@ function buildQuarters() {
   return quarters
 }
 
-export function CoverageTimeline({ articles }: CoverageTimelineProps) {
+export function CoverageTimeline({ articles = [] }: CoverageTimelineProps) {
   const quarters = useMemo(() => buildQuarters(), [])
 
   const data = useMemo(() => {
