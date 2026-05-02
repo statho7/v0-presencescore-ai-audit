@@ -253,11 +253,17 @@ export async function POST(request: Request) {
 
     const html = buildHtml(result)
 
+    // Vercel strips the local bin/ directory (too large for Lambda).
+    // Pass the release URL so chromium downloads to /tmp and caches across warm invocations.
+    const executablePath = await chromium.executablePath(
+      "https://github.com/Sparticuz/chromium/releases/download/v148.0.0/chromium-v148.0.0-pack.tar",
+    )
+
     const browser = await puppeteer.launch({
       args: chromium.args,
       defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
-      headless: true,
+      executablePath,
+      headless: chromium.headless,
     })
 
     try {
