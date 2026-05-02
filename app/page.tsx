@@ -14,6 +14,7 @@ export default function Home() {
   const [postcode, setPostcode] = useState("")
   const [runId, setRunId] = useState<string | null>(null)
   const [result, setResult] = useState<AuditResult | null>(null)
+  const [cachedAt, setCachedAt] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   // Resume an in-flight audit when arriving via /?runId=... — this happens
@@ -43,8 +44,20 @@ export default function Home() {
       })
 
       if (!res.ok) throw new Error("Failed to start audit")
-      const { runId } = await res.json()
-      setRunId(runId)
+      const data = await res.json()
+      setRunId(data.runId)
+
+      if (data.cached) {
+        // Recent audit found — skip the workflow and go straight to results.
+        setCachedAt(data.cachedAt)
+        setResult(data.result)
+        setStage("results")
+        if (typeof window !== "undefined") {
+          window.history.pushState({}, "", `/results/${data.runId}`)
+        }
+        return
+      }
+
       setStage("running")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start audit")
@@ -66,6 +79,7 @@ export default function Home() {
     setStage("landing")
     setResult(null)
     setRunId(null)
+    setCachedAt(null)
     setError(null)
     if (typeof window !== "undefined") {
       window.history.pushState({}, "", "/")
@@ -88,7 +102,7 @@ export default function Home() {
   }
 
   if (stage === "results" && result) {
-    return <ResultsView result={result} onReset={handleReset} />
+    return <ResultsView result={result} onReset={handleReset} cachedAt={cachedAt ?? undefined} />
   }
 
   return null

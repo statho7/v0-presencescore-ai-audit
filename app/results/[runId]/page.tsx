@@ -20,5 +20,14 @@ export default async function ResultsPage({ params }: PageProps) {
     redirect(`/?runId=${encodeURIComponent(runId)}`)
   }
 
-  return <ResultsViewClient result={row.result} />
+  const createdAt = new Date(row.created_at)
+  const ageMs = Date.now() - createdAt.getTime()
+  const isRecent = ageMs < 7 * 24 * 60 * 60 * 1000
+
+  return (
+    <ResultsViewClient
+      result={row.result}
+      cachedAt={isRecent ? row.created_at : undefined}
+    />
+  )
 }

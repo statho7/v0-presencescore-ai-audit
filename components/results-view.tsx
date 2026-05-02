@@ -1,6 +1,6 @@
 "use client"
 
-import { Download, RotateCcw, Sparkles } from "lucide-react"
+import { Download, RotateCcw, Sparkles, Clock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { CompetitorTable } from "@/components/competitor-table"
 import { CoverageTimeline } from "@/components/coverage-timeline"
@@ -12,9 +12,10 @@ import type { AuditResult } from "@/lib/audit-data"
 type ResultsViewProps = {
   result: AuditResult
   onReset: () => void
+  cachedAt?: string
 }
 
-export function ResultsView({ result, onReset }: ResultsViewProps) {
+export function ResultsView({ result, onReset, cachedAt }: ResultsViewProps) {
   function handleDownload() {
     window.print()
   }
@@ -45,6 +46,31 @@ export function ResultsView({ result, onReset }: ResultsViewProps) {
       </header>
 
       <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-10 md:px-10 md:py-14">
+        {/* Cached audit notice */}
+        {cachedAt && (
+          <div className="mb-6 flex items-start gap-3 rounded-xl border border-border bg-card/60 px-4 py-3 text-sm text-muted-foreground">
+            <Clock className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            <span>
+              We found a recent audit for this restaurant from{" "}
+              <span className="font-medium text-foreground">
+                {new Date(cachedAt).toLocaleDateString("en-GB", {
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric",
+                })}
+              </span>
+              {" "}— we did not re-run the audit as it is less than a week old. Run a{" "}
+              <button
+                onClick={onReset}
+                className="underline underline-offset-2 hover:text-foreground transition-colors"
+              >
+                new audit
+              </button>{" "}
+              to get a fresh result.
+            </span>
+          </div>
+        )}
+
         {/* Score dial section */}
         <section className="rounded-2xl border border-border bg-card/40 p-6 md:p-10">
           <ScoreDial
