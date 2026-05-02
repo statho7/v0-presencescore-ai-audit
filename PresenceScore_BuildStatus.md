@@ -160,7 +160,7 @@ The 4pt "engagement above borough median" signal requires a reference dataset. A
 | 1 | All pipeline steps verified on Vercel prod | ✅ Done |
 | 2 | PDF download verified | ✅ Done (window.print) |
 | 3 | Run live Brat audit on prod, record real scores | ✅ Done |
-| 4 | Update demo script to match real Brat numbers | ⬜ After #3 |
+| 4 | Update demo script to match real Brat numbers | ✅ Done — 64/100, 15 articles, Conversion 4/20 is the story |
 | 5 | Test graceful degradation (no Instagram / no website) | ⬜ Optional |
 | 6 | Fix `anyCoverageIn12Months` to compute from dates | ✅ Done |
 | 7 | Hackathon submission write-up | ⬜ Do this |

@@ -319,9 +319,9 @@ To be explicit about scope and avoid feature creep:
 
 Agent runs live. Each step appears in the workflow dashboard. 90 seconds later:
 
-*"Brat in Shoreditch scores 71 out of 100. Their earned presence is exceptional — 14 press mentions in the last 12 months, 93% positive, covered by The Guardian and Time Out. But their owned presence has gaps: their GBP has only 23 photos, no booking link, and their website has no schema markup. Their nearest competitor Smoking Goat scores 58 overall — weaker press, but stronger GBP signals.*
+*"Brat in Shoreditch scores 64 out of 100. Their earned presence is exceptional — 15 press mentions, 6 from Tier-1 outlets, 100% positive, and a perfect 20/20 on Google Business Profile with 352 photos and a live booking link. But their owned digital presence has gaps: the website scores just 4/20 on conversion — no schema markup, no booking widget, and Instagram is underusing a 157k audience with only 4 posts in 30 days. Their nearest competitor The Culpeper scores 78 overall — weaker press, but a stronger website converts visitors into reservations.*
 
-*Here are their top 3 quick wins: add 40 photos to Google — takes an afternoon, estimated impact +6 points. Add an OpenTable widget to their website — 2 hours with a developer, +4 points. Fix their Instagram posting cadence — they've been dark for 6 weeks."*
+*Here are their top 3 quick wins: embed a Resy or OpenTable widget on the homepage — 30 minutes, +8 points. Add JSON-LD schema markup — 30 minutes, +6 points. Post one Reel this week — 30 minutes, +4 points."*
 
 *Then we hit download — and they get this PDF.*
 
