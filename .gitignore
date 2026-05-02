@@ -29,3 +29,5 @@ next-env.d.ts
 docs/
 data/
 .env*.local
+
+.DS_Store
