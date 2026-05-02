@@ -26,15 +26,22 @@ async function serpSearch(query: string): Promise<string> {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      zone: process.env.BRIGHTDATA_SERP_ZONE,
-      url: `https://www.google.com/search?q=${encodeURIComponent(query)}&gl=gb&hl=en`,
-      format: "json",
+      zone: process.env.BRIGHTDATA_UNLOCKER_ZONE,
+      url: `https://www.google.com/search?q=${encodeURIComponent(query)}&gl=gb&hl=en&num=10`,
+      format: "raw",
     }),
   });
   if (res.status === 429) throw new RetryableError("Bright Data rate limited", { retryAfter: "30s" });
-  if (!res.ok) throw new FatalError(`SERP API error: ${res.status}`);
-  const json = await res.json();
-  return JSON.stringify(json).slice(0, 8000);
+  if (!res.ok) throw new FatalError(`Google search failed: ${res.status}`);
+  const html = await res.text();
+  // Strip scripts/styles, keep visible text for Claude
+  const text = html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return text.slice(0, 8000);
 }
 
 async function unlockUrl(url: string): Promise<string> {
