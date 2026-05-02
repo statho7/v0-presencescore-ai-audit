@@ -1,5 +1,6 @@
 import { getWritable, FatalError, RetryableError } from "workflow";
-import { generateText } from "ai";
+import { generateText, Output } from "ai";
+import { z } from "zod";
 import type { AuditResult, QuickWin, Competitor, ScoreDimension } from "@/lib/audit-data";
 
 // ---------------------------------------------------------------------------
@@ -19,6 +20,7 @@ export type AuditEvent =
 const BD_API = "https://api.brightdata.com/request";
 
 async function serpSearch(query: string): Promise<string> {
+  console.log(`[serpSearch] query="${query}"`);
   const res = await fetch(BD_API, {
     method: "POST",
     headers: {
@@ -34,17 +36,19 @@ async function serpSearch(query: string): Promise<string> {
   if (res.status === 429) throw new RetryableError("Bright Data rate limited", { retryAfter: "30s" });
   if (!res.ok) throw new FatalError(`Google search failed: ${res.status}`);
   const html = await res.text();
-  // Strip scripts/styles, keep visible text for Claude
   const text = html
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
     .replace(/<[^>]+>/g, " ")
     .replace(/\s{2,}/g, " ")
     .trim();
-  return text.slice(0, 8000);
+  const truncated = text.slice(0, 8000);
+  console.log(`[serpSearch] raw text length=${text.length} truncated=${truncated.length} preview="${truncated.slice(0, 300)}"`);
+  return truncated;
 }
 
 async function unlockUrl(url: string): Promise<string> {
+  console.log(`[unlockUrl] fetching url="${url}"`);
   const res = await fetch(BD_API, {
     method: "POST",
     headers: {
@@ -60,36 +64,41 @@ async function unlockUrl(url: string): Promise<string> {
   if (res.status === 429) throw new RetryableError("Bright Data rate limited", { retryAfter: "30s" });
   if (!res.ok) throw new FatalError(`Web Unlocker error: ${res.status}`);
   const text = await res.text();
-  return text.slice(0, 6000);
+  const truncated = text.slice(0, 6000);
+  console.log(`[unlockUrl] url="${url}" raw length=${text.length} truncated=${truncated.length}`);
+  return truncated;
 }
 
 async function getInstagramProfile(handle: string): Promise<string> {
-  const res = await fetch(BD_API, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.BRIGHTDATA_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      zone: process.env.BRIGHTDATA_UNLOCKER_ZONE,
-      url: `https://www.instagram.com/${handle}/`,
-      format: "raw",
-    }),
-  });
-  if (!res.ok) return "";
-  const text = await res.text();
-  return text.slice(0, 4000);
+  // Instagram's HTML is almost entirely JS bundles — scraping the page directly yields
+  // no readable data even at 8000 chars. Instead, search Google for the profile which
+  // returns a knowledge-panel snippet with follower counts, post counts etc.
+  console.log(`[getInstagramProfile] handle="${handle}" (via Google SERP)`);
+  return serpSearch(`site:instagram.com ${handle} followers posts`);
 }
 
 // ---------------------------------------------------------------------------
 // AI Gateway call
 // ---------------------------------------------------------------------------
 
-async function askClaude(prompt: string): Promise<string> {
+async function askStructured<T>(label: string, prompt: string, schema: z.ZodType<T>): Promise<T> {
+  console.log(`[askStructured] label="${label}" prompt length=${prompt.length}`);
+  const { output } = await generateText({
+    model: "anthropic/claude-sonnet-4.6",
+    output: Output.object({ schema }),
+    prompt,
+  });
+  console.log(`[askStructured] label="${label}" output=${JSON.stringify(output).slice(0, 200)}`);
+  return output;
+}
+
+async function askClaude(label: string, prompt: string): Promise<string> {
+  console.log(`[askClaude] label="${label}" prompt length=${prompt.length}`);
   const { text } = await generateText({
     model: "anthropic/claude-sonnet-4.6",
     prompt,
   });
+  console.log(`[askClaude] label="${label}" response length=${text.length} preview="${text.slice(0, 200)}"`);
   return text;
 }
 
@@ -99,6 +108,7 @@ async function askClaude(prompt: string): Promise<string> {
 
 async function emit(event: AuditEvent): Promise<void> {
   "use step";
+  console.log(`[emit] type="${event.type}" ${"stepId" in event ? `stepId="${event.stepId}"` : ""}`);
   const writer = getWritable<AuditEvent>().getWriter();
   try {
     await writer.write(event);
@@ -126,50 +136,53 @@ type Identity = {
 
 async function resolveIdentity(restaurantName: string, postcode: string): Promise<Identity> {
   "use step";
+  console.log(`[resolveIdentity] START name="${restaurantName}" postcode="${postcode}"`);
   await emit({ type: "step_start", stepId: "identity" });
 
   const raw = await serpSearch(`${restaurantName} restaurant ${postcode} London`);
 
-  const analysis = await askClaude(`You are parsing Google SERP JSON for a London restaurant lookup.
+  // Second SERP: search specifically for nearby competitors in the same postcode district
+  const district = postcode.split(" ")[0]; // e.g. "SE1" from "SE1 8HA"
+  const competitorRaw = await serpSearch(`restaurants pubs near ${postcode} London ${district} site:google.com/maps OR "near me" -site:tripadvisor.com`);
+
+  const identitySchema = z.object({
+    canonicalName: z.string(),
+    address: z.string(),
+    websiteUrl: z.string(),
+    instagramHandle: z.string(),
+    gbpRating: z.number(),
+    gbpReviews: z.number(),
+    gbpPhotos: z.number(),
+    hasBookingLink: z.boolean(),
+    hasHours: z.boolean(),
+    competitors: z.array(z.string()),
+  });
+
+  const identity = await askStructured("identity", `You are parsing Google Search results for a London restaurant lookup. The text has been stripped of HTML tags.
 
 Query: "${restaurantName} restaurant ${postcode} London"
-SERP data (truncated): ${raw}
+Stripped Google SERP text: ${raw}
 
-Extract and return ONLY valid JSON (no markdown):
-{
-  "canonicalName": "exact restaurant name from Google",
-  "address": "full street address",
-  "websiteUrl": "restaurant website URL or empty string",
-  "instagramHandle": "instagram handle without @ or empty string",
-  "gbpRating": 4.2,
-  "gbpReviews": 234,
-  "gbpPhotos": 45,
-  "hasBookingLink": true,
-  "hasHours": true,
-  "competitors": ["Competitor 1", "Competitor 2", "Competitor 3", "Competitor 4", "Competitor 5"]
-}
+Look for:
+- The restaurant name as it appears on Google
+- Its address (street names, postcodes like SE1, EC1)
+- Website URL (domains like .co.uk, .com near the restaurant name)
+- Instagram handle (instagram.com/... URLs or @handle mentions)
+- Star rating (numbers like 4.1 followed by star symbols or "stars")
+- Review count (numbers followed by "reviews" or in parentheses)
+- Photo count (numbers followed by "photos" or "images" in the knowledge panel)
+- Booking signals (Reserve, Book, OpenTable, Resy, SevenRooms)
+- Hours (Open, Closed, day names, time patterns)
 
-If data is missing use sensible defaults. competitors should be nearby restaurants in the same area.`);
+Nearby competitors SERP (geographically close venues — use ONLY these for competitors):
+${competitorRaw}
 
-  let identity: Identity;
-  try {
-    identity = JSON.parse(analysis);
-  } catch {
-    identity = {
-      canonicalName: restaurantName,
-      address: postcode,
-      websiteUrl: "",
-      instagramHandle: "",
-      gbpRating: 0,
-      gbpReviews: 0,
-      gbpPhotos: 0,
-      hasBookingLink: false,
-      hasHours: false,
-      competitors: [],
-    };
-  }
+Rules:
+- Use empty string for text fields not found, 0 for numbers not found, false for booleans not found
+- competitors: pick 5 restaurants/pubs from the nearby competitors SERP that are NOT "${restaurantName}" and are in the ${district} area`, identitySchema);
 
   const log = `Found on Google · ${identity.gbpReviews} reviews (${identity.gbpRating}★) · ${identity.gbpPhotos} photos`;
+  console.log(`[resolveIdentity] DONE log="${log}" websiteUrl="${identity.websiteUrl}" instagramHandle="${identity.instagramHandle}"`);
   await emit({ type: "step_done", stepId: "identity", log });
   return identity;
 }
@@ -190,44 +203,41 @@ type GbpAudit = {
 
 async function auditGbp(identity: Identity): Promise<GbpAudit> {
   "use step";
+  console.log(`[auditGbp] START name="${identity.canonicalName}" photos=${identity.gbpPhotos} reviews=${identity.gbpReviews}`);
   await emit({ type: "step_start", stepId: "gbp" });
 
-  const raw = await serpSearch(`"${identity.canonicalName}" ${identity.address} site:google.com/maps OR google.com/search`);
+  // Dedicated GBP signals search — Google Maps knowledge panel often shows photo count
+  const raw = await serpSearch(`"${identity.canonicalName}" "${identity.address.split(",")[0]}" photos reviews Google Maps`);
 
-  const analysis = await askClaude(`Analyse this Google SERP data for a restaurant's Google Business Profile.
+  const gbpSchema = z.object({
+    gbpClaimed: z.boolean(),
+    inLocalPack: z.boolean(),
+    photoCount: z.number(),
+    hasBookingLink: z.boolean(),
+    hasHours: z.boolean(),
+    hasMenuLink: z.boolean(),
+    specificCategory: z.boolean(),
+  });
 
-Restaurant: ${identity.canonicalName}
+  const audit = await askStructured("gbp", `Analyse this Google SERP data to audit a restaurant's Google Business Profile.
+
+Restaurant: ${identity.canonicalName}, ${identity.address}
+Known signals:
+- Rating: ${identity.gbpRating} stars, Reviews: ${identity.gbpReviews}, Has hours: ${identity.hasHours}, Has booking link: ${identity.hasBookingLink}
+
 SERP data: ${raw}
 
-Return ONLY valid JSON:
-{
-  "gbpClaimed": true,
-  "inLocalPack": true,
-  "photoCount": 45,
-  "hasBookingLink": false,
-  "hasHours": true,
-  "hasMenuLink": false,
-  "specificCategory": true
-}
-
-Use the SERP data to infer these signals. Default to false/0 if uncertain.`);
-
-  let audit: GbpAudit;
-  try {
-    audit = JSON.parse(analysis);
-  } catch {
-    audit = {
-      gbpClaimed: identity.gbpPhotos > 0,
-      inLocalPack: false,
-      photoCount: identity.gbpPhotos,
-      hasBookingLink: identity.hasBookingLink,
-      hasHours: identity.hasHours,
-      hasMenuLink: false,
-      specificCategory: false,
-    };
-  }
+Rules:
+- gbpClaimed: true because reviews=${identity.gbpReviews} > 0
+- inLocalPack: true if the restaurant appears in a map/local pack
+- photoCount: look for "X photos", "X images", "See all X photos" patterns. If not found use ${identity.gbpPhotos}
+- hasBookingLink: true if SERP mentions Reserve, Book, OpenTable, Resy, SevenRooms — or use ${identity.hasBookingLink}
+- hasMenuLink: true if a menu URL or "Menu" link appears
+- specificCategory: true if a specific cuisine type appears (Pub, British, Thai, Italian etc)`, gbpSchema);
+  console.log(`[auditGbp] parsed audit=${JSON.stringify(audit)}`);
 
   const log = `${audit.photoCount} photos · ${audit.hasBookingLink ? "Booking link found" : "No booking link"} · ${audit.hasHours ? "Hours set" : "No hours"}`;
+  console.log(`[auditGbp] DONE log="${log}"`);
   await emit({ type: "step_done", stepId: "gbp", log });
   return audit;
 }
@@ -249,9 +259,11 @@ type WebsiteAudit = {
 
 async function auditWebsite(identity: Identity): Promise<WebsiteAudit> {
   "use step";
+  console.log(`[auditWebsite] START name="${identity.canonicalName}" websiteUrl="${identity.websiteUrl}"`);
   await emit({ type: "step_start", stepId: "website" });
 
   if (!identity.websiteUrl) {
+    console.log(`[auditWebsite] no website URL — skipping`);
     const log = "No website found";
     await emit({ type: "step_done", stepId: "website", log });
     return {
@@ -268,48 +280,38 @@ async function auditWebsite(identity: Identity): Promise<WebsiteAudit> {
 
   const html = await unlockUrl(identity.websiteUrl);
 
-  const analysis = await askClaude(`You are auditing a restaurant website HTML for digital presence signals.
+  const websiteSchema = z.object({
+    websiteLoads: z.boolean(),
+    htmlMenu: z.boolean(),
+    bookingWidget: z.boolean(),
+    schemaMarkup: z.boolean(),
+    allergenInfo: z.boolean(),
+    socialLinks: z.boolean(),
+    aboutPage: z.boolean(),
+    mobileScore: z.number(),
+  });
+
+  const audit = await askStructured("website", `Audit this restaurant website HTML for digital presence signals.
 
 Restaurant: ${identity.canonicalName}
 Website HTML (truncated): ${html}
 
-Return ONLY valid JSON:
-{
-  "websiteLoads": true,
-  "htmlMenu": true,
-  "bookingWidget": false,
-  "schemaMarkup": false,
-  "allergenInfo": false,
-  "socialLinks": true,
-  "aboutPage": true,
-  "mobileScore": 72
-}
-
+Rules:
+- websiteLoads: always true since we have HTML
 - htmlMenu: true if there's an inline menu (not just a PDF link)
 - bookingWidget: true if there's an embedded booking form/button
 - schemaMarkup: true if you see application/ld+json or schema.org
-- mobileScore: estimate 0-100 based on viewport meta, responsive CSS, font sizes`);
+- allergenInfo: true if allergen or dietary information is present
+- socialLinks: true if Instagram, Facebook, or Twitter links appear
+- aboutPage: true if an About or Story section exists
+- mobileScore: estimate 0-100 based on viewport meta, responsive CSS, font sizes`, websiteSchema);
+  const auditWithLoads = { ...audit, websiteLoads: true };
+  console.log(`[auditWebsite] parsed audit=${JSON.stringify(auditWithLoads)}`);
 
-  let audit: WebsiteAudit;
-  try {
-    audit = JSON.parse(analysis);
-    audit.websiteLoads = true;
-  } catch {
-    audit = {
-      websiteLoads: true,
-      htmlMenu: false,
-      bookingWidget: false,
-      schemaMarkup: false,
-      allergenInfo: false,
-      socialLinks: false,
-      aboutPage: false,
-      mobileScore: 50,
-    };
-  }
-
-  const log = `Mobile score ~${audit.mobileScore} · ${audit.schemaMarkup ? "Schema markup found" : "No schema markup"} · ${audit.bookingWidget ? "Booking widget present" : "No booking widget"}`;
+  const log = `Mobile score ~${auditWithLoads.mobileScore} · ${auditWithLoads.schemaMarkup ? "Schema markup found" : "No schema markup"} · ${auditWithLoads.bookingWidget ? "Booking widget present" : "No booking widget"}`;
+  console.log(`[auditWebsite] DONE log="${log}"`);
   await emit({ type: "step_done", stepId: "website", log });
-  return audit;
+  return auditWithLoads;
 }
 
 // ---------------------------------------------------------------------------
@@ -327,9 +329,28 @@ type SocialAudit = {
 
 async function auditInstagram(identity: Identity): Promise<SocialAudit> {
   "use step";
+  console.log(`[auditInstagram] START name="${identity.canonicalName}" handle="${identity.instagramHandle}"`);
   await emit({ type: "step_start", stepId: "instagram" });
 
-  if (!identity.instagramHandle) {
+  // If identity didn't find a handle, search Google for it
+  let handle = identity.instagramHandle;
+  if (!handle) {
+    console.log(`[auditInstagram] no handle from identity — searching Google for Instagram`);
+    const igSearch = await serpSearch(`${identity.canonicalName} ${identity.address} instagram`);
+    const igHandle = await askClaude("instagram-handle", `Find the Instagram handle for this restaurant from Google search results.
+
+Restaurant: ${identity.canonicalName}, ${identity.address}
+Search results: ${igSearch}
+
+Look for instagram.com/... URLs or @handle mentions near the restaurant name.
+Return ONLY the handle without @ (e.g. "roseandcrownse1"), or empty string if not found.
+No JSON, no markdown — just the raw handle string or empty string.`);
+    handle = igHandle.replace(/^@/, "").replace(/[^a-zA-Z0-9._]/g, "").trim();
+    console.log(`[auditInstagram] Google search found handle="${handle}"`);
+  }
+
+  if (!handle) {
+    console.log(`[auditInstagram] no Instagram handle found anywhere — skipping`);
     const log = "No Instagram account found";
     await emit({ type: "step_done", stepId: "instagram", log });
     return {
@@ -342,41 +363,34 @@ async function auditInstagram(identity: Identity): Promise<SocialAudit> {
     };
   }
 
-  const html = await getInstagramProfile(identity.instagramHandle);
+  const html = await getInstagramProfile(handle);
+  console.log(`[auditInstagram] serp length=${html.length}`);
 
-  const analysis = await askClaude(`Extract Instagram presence data from this HTML for a London restaurant.
+  const socialSchema = z.object({
+    instagramLinked: z.boolean(),
+    followers: z.number(),
+    postsLast30Days: z.number(),
+    hasReels: z.boolean(),
+    engagementAboveMedian: z.boolean(),
+    tiktokExists: z.boolean(),
+  });
 
-Handle: @${identity.instagramHandle}
-HTML (truncated): ${html}
+  const audit = await askStructured("instagram", `Extract Instagram presence data for a London restaurant from this Google search snippet.
 
-Return ONLY valid JSON:
-{
-  "instagramLinked": true,
-  "followers": 8200,
-  "postsLast30Days": 6,
-  "hasReels": true,
-  "engagementAboveMedian": false,
-  "tiktokExists": false
-}
+Handle: @${handle}
+Google search snippet (from searching Instagram profile on Google): ${html}
 
-Estimate followers from any number you see. postsLast30Days: estimate from post frequency signals.
-engagementAboveMedian: true if likes/comments suggest >3% engagement for their follower count.`);
+Rules:
+- instagramLinked: true since we have a handle
+- followers: extract from "2,828 followers" or "2.8K followers" patterns (convert K to thousands). Use 0 if not found.
+- postsLast30Days: estimate from post count if shown, otherwise use 4 as a reasonable default for an active account
+- hasReels: true if Reels tab or reel content is mentioned
+- engagementAboveMedian: true if strong engagement signals appear (high like counts relative to followers)
+- tiktokExists: true if a TikTok account for this restaurant is mentioned`, socialSchema);
+  console.log(`[auditInstagram] parsed audit=${JSON.stringify(audit)}`);
 
-  let audit: SocialAudit;
-  try {
-    audit = JSON.parse(analysis);
-  } catch {
-    audit = {
-      instagramLinked: true,
-      followers: 0,
-      postsLast30Days: 0,
-      hasReels: false,
-      engagementAboveMedian: false,
-      tiktokExists: false,
-    };
-  }
-
-  const log = `@${identity.instagramHandle} · ${audit.followers.toLocaleString()} followers · ${audit.postsLast30Days} posts/30d · ${audit.hasReels ? "Has reels" : "No recent reels"}`;
+  const log = `@${handle} · ${audit.followers.toLocaleString()} followers · ${audit.postsLast30Days} posts/30d · ${audit.hasReels ? "Has reels" : "No recent reels"}`;
+  console.log(`[auditInstagram] DONE log="${log}"`);
   await emit({ type: "step_done", stepId: "instagram", log });
   return audit;
 }
@@ -396,44 +410,38 @@ type PressAudit = {
 
 async function auditPress(identity: Identity): Promise<PressAudit> {
   "use step";
+  console.log(`[auditPress] START name="${identity.canonicalName}"`);
   await emit({ type: "step_start", stepId: "press" });
 
-  const raw = await serpSearch(`"${identity.canonicalName}" London restaurant review OR feature site:theguardian.com OR timeout.com OR standard.co.uk OR telegraph.co.uk OR independent.co.uk`);
+  // Include the address to avoid confusing this pub with other "Rose & Crown" pubs
+  const pressQuery = `"${identity.canonicalName}" "${identity.address.split(",")[0]}" London restaurant review OR feature site:theguardian.com OR timeout.com OR standard.co.uk OR telegraph.co.uk OR independent.co.uk`;
+  const raw = await serpSearch(pressQuery);
 
-  const analysis = await askClaude(`You are analysing press coverage for a London restaurant.
+  const pressSchema = z.object({
+    articleCount: z.number(),
+    anyCoverageIn12Months: z.boolean(),
+    tier1Coverage: z.boolean(),
+    positiveSentiment: z.boolean(),
+    noNegativeInTopResults: z.boolean(),
+    articleTitles: z.array(z.string()),
+  });
+
+  const audit = await askStructured("press", `Analyse press coverage for a specific London restaurant.
 
 Restaurant: ${identity.canonicalName}
+Address: ${identity.address}
 Google News / SERP data: ${raw}
 
-Return ONLY valid JSON:
-{
-  "articleCount": 3,
-  "anyCoverageIn12Months": true,
-  "tier1Coverage": false,
-  "positiveSentiment": true,
-  "noNegativeInTopResults": true,
-  "articleTitles": ["Title 1 – Source (Year)", "Title 2 – Source (Year)"]
-}
-
-tier1Coverage: true if Guardian, Time Out, Evening Standard, Telegraph, or Independent.
-positiveSentiment: true if the coverage tone is positive or mixed-positive.
-noNegativeInTopResults: true if no clearly negative reviews appear in top results.`);
-
-  let audit: PressAudit;
-  try {
-    audit = JSON.parse(analysis);
-  } catch {
-    audit = {
-      articleCount: 0,
-      anyCoverageIn12Months: false,
-      tier1Coverage: false,
-      positiveSentiment: false,
-      noNegativeInTopResults: true,
-      articleTitles: [],
-    };
-  }
+Rules:
+- Only count articles genuinely about THIS restaurant at ${identity.address} — ignore same-name venues elsewhere
+- tier1Coverage: true if Guardian, Time Out, Evening Standard, Telegraph, or Independent
+- positiveSentiment: true if coverage tone is positive or mixed-positive
+- noNegativeInTopResults: true if no clearly negative reviews appear
+- If no relevant articles found, use articleCount: 0 and all false`, pressSchema);
+  console.log(`[auditPress] parsed audit=${JSON.stringify(audit)}`);
 
   const log = `${audit.articleCount} article${audit.articleCount !== 1 ? "s" : ""} found · ${audit.tier1Coverage ? "Tier-1 coverage" : "No tier-1"} · ${audit.positiveSentiment ? "Positive sentiment" : "Mixed/negative sentiment"}`;
+  console.log(`[auditPress] DONE log="${log}"`);
   await emit({ type: "step_done", stepId: "press", log });
   return audit;
 }
@@ -452,37 +460,32 @@ type CompetitorData = {
 
 async function benchmarkCompetitors(competitors: string[], postcode: string): Promise<CompetitorData[]> {
   "use step";
+  console.log(`[benchmarkCompetitors] START competitors=${JSON.stringify(competitors)} postcode="${postcode}"`);
   await emit({ type: "step_start", stepId: "competitors" });
 
   const names = competitors.slice(0, 5);
   const raw = await serpSearch(`${names.join(" OR ")} restaurant ${postcode} London`);
 
-  const analysis = await askClaude(`You are benchmarking ${names.length} competitor restaurants near ${postcode}, London.
+  const competitorSchema = z.object({
+    competitors: z.array(z.object({
+      name: z.string(),
+      score: z.number(),
+      gbpPhotos: z.number(),
+      pressMentions: z.number(),
+      bookingLink: z.boolean(),
+    })),
+  });
+
+  const { competitors: data } = await askStructured("competitors", `Benchmark ${names.length} competitor restaurants near ${postcode}, London.
 
 Competitors: ${names.join(", ")}
 SERP data: ${raw}
 
-Return ONLY a valid JSON array (no markdown):
-[
-  { "name": "Competitor Name", "score": 65, "gbpPhotos": 45, "pressMentions": 3, "bookingLink": true }
-]
-
-Estimate scores 0-90 based on what you can infer from the SERP. Return one entry per competitor.`);
-
-  let data: CompetitorData[];
-  try {
-    data = JSON.parse(analysis);
-  } catch {
-    data = names.map((name) => ({
-      name,
-      score: 60,
-      gbpPhotos: 30,
-      pressMentions: 2,
-      bookingLink: true,
-    }));
-  }
+Estimate scores 0-90 based on what you can infer from the SERP. Return one entry per competitor in the competitors array.`, competitorSchema);
+  console.log(`[benchmarkCompetitors] parsed ${data.length} competitors`);
 
   const log = `Benchmarked ${data.length} competitors in ${postcode}`;
+  console.log(`[benchmarkCompetitors] DONE log="${log}"`);
   await emit({ type: "step_done", stepId: "competitors", log });
   return data;
 }
@@ -498,6 +501,7 @@ function calculateScore(
   press: PressAudit,
   competitors: CompetitorData[],
   myRawScore: number,
+  gbpReviews: number = 0,
 ): { dimensions: ScoreDimension[]; total: number; competitive: number } {
   const discovery =
     (gbp.gbpClaimed ? 4 : 0) +
@@ -531,7 +535,12 @@ function calculateScore(
     (press.positiveSentiment ? 5 : 0) +
     (press.noNegativeInTopResults ? 5 : 0);
 
-  const ugc = Math.min(10, Math.round(social.followers / 1000));
+  // UGC: Instagram followers are the primary signal. Fall back to GBP review count
+  // (reviews correlate strongly with customer photo-tagging and UGC volume).
+  const ugcSource = social.followers > 0
+    ? social.followers
+    : (gbpReviews > 500 ? 5000 : gbpReviews > 100 ? 2000 : 0);
+  const ugc = Math.min(10, Math.round(ugcSource / 1000));
 
   const avgCompetitorScore =
     competitors.length > 0
@@ -569,18 +578,22 @@ async function generateReport(
   competitorData: CompetitorData[],
 ): Promise<AuditResult> {
   "use step";
+  console.log(`[generateReport] START name="${identity.canonicalName}"`);
   await emit({ type: "step_start", stepId: "score" });
 
-  const rawScore = 0; // placeholder for competitive calc
-  const { dimensions, total } = calculateScore(gbp, web, social, press, competitorData, rawScore);
-  const { competitive } = calculateScore(gbp, web, social, press, competitorData, total - dimensions.find(d => d.key === "competitive")!.score);
+  // First pass: calculate score without competitive dimension (pass 0) to get base total
+  const { dimensions: baseDimensions, total: baseTotal } = calculateScore(gbp, web, social, press, competitorData, 0, identity.gbpReviews);
+  const baseWithoutCompetitive = baseTotal - baseDimensions.find(d => d.key === "competitive")!.score;
+  // Second pass: use the base score as myRawScore so competitive is calculated against real competitor avg
+  const { dimensions, total, competitive } = calculateScore(gbp, web, social, press, competitorData, baseWithoutCompetitive, identity.gbpReviews);
 
+  console.log(`[generateReport] total=${total} dimensions=${JSON.stringify(dimensions.map(d => ({ key: d.key, score: d.score })))}`);
   await emit({ type: "step_done", stepId: "score", log: `PresenceScore: ${total}/100 · Confidence: high` });
   await emit({ type: "step_start", stepId: "recommendations" });
 
   const topCompetitor = competitorData.sort((a, b) => b.score - a.score)[0];
 
-  const aiResponse = await askClaude(`You are writing a digital presence report for a London restaurant owner. Be direct and practical.
+  const aiResponse = await askClaude("report", `You are writing a digital presence report for a London restaurant owner. Be direct and practical.
 
 Restaurant: ${identity.canonicalName}, ${identity.address}
 PresenceScore: ${total}/100
@@ -600,7 +613,7 @@ Key signals:
 - Press articles: ${press.articleCount} | Tier-1: ${press.tier1Coverage} | Positive: ${press.positiveSentiment}
 ${topCompetitor ? `Top competitor: ${topCompetitor.name} scores ${topCompetitor.score}/100` : ""}
 
-Write exactly 3 short paragraphs (2-4 sentences each):
+Write exactly 3 short paragraphs (2-4 sentences each). No headers, no markdown formatting, no bold text, no bullet points — plain prose only:
 1. What they're doing well — be specific, name actual signals
 2. Their biggest vulnerability — be direct, reference real gaps
 3. The single most important action to take this week
@@ -614,6 +627,7 @@ Separate the paragraphs from the JSON with the exact delimiter: ---JSON---`);
   let quickWins: QuickWin[] = [];
 
   const parts = aiResponse.split("---JSON---");
+  console.log(`[generateReport] aiResponse parts=${parts.length}`);
   if (parts.length >= 2) {
     narrative = parts[0]
       .trim()
@@ -621,7 +635,10 @@ Separate the paragraphs from the JSON with the exact delimiter: ---JSON---`);
       .filter((p) => p.trim().length > 0)
       .slice(0, 3);
     try {
-      const parsed = JSON.parse(parts[1].trim());
+      // Strip any code fences Claude wraps around the JSON array
+      const jsonRaw = parts[1].trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+      console.log(`[generateReport] quickWins raw="${jsonRaw.slice(0, 100)}"`);
+      const parsed = JSON.parse(jsonRaw);
       quickWins = parsed.map(
         (w: { action: string; timeEstimate: string; impactPoints: number; whyItMatters: string; icon: QuickWin["icon"] }) => ({
           icon: w.icon || "link",
@@ -631,10 +648,13 @@ Separate the paragraphs from the JSON with the exact delimiter: ---JSON---`);
           impact: `+${w.impactPoints} pts`,
         }),
       );
-    } catch {
+      console.log(`[generateReport] quickWins=${quickWins.length} narrative paragraphs=${narrative.length}`);
+    } catch (err) {
+      console.log(`[generateReport] quickWins JSON parse failed err=${err}`);
       quickWins = [];
     }
   } else {
+    console.log(`[generateReport] no ---JSON--- delimiter found — using raw response as narrative`);
     narrative = [aiResponse.trim()];
   }
 
@@ -661,6 +681,7 @@ Separate the paragraphs from the JSON with the exact delimiter: ---JSON---`);
   ];
 
   await emit({ type: "step_done", stepId: "recommendations", log: `${quickWins.length} quick wins identified · Narrative generated` });
+  console.log(`[generateReport] DONE total=${total} quickWins=${quickWins.length}`);
 
   return {
     restaurantName: identity.canonicalName,
@@ -679,18 +700,26 @@ Separate the paragraphs from the JSON with the exact delimiter: ---JSON---`);
 
 export async function runAudit(restaurantName: string, postcode: string): Promise<AuditResult> {
   "use workflow";
+  console.log(`[runAudit] START restaurantName="${restaurantName}" postcode="${postcode}"`);
 
   const identity = await resolveIdentity(restaurantName, postcode);
+  console.log(`[runAudit] identity resolved, starting parallel audit steps`);
+
   const [gbp, website, social, press] = await Promise.all([
     auditGbp(identity),
     auditWebsite(identity),
     auditInstagram(identity),
     auditPress(identity),
   ]);
+  console.log(`[runAudit] parallel steps done, starting competitor benchmark`);
+
   const competitorData = await benchmarkCompetitors(identity.competitors, postcode);
+  console.log(`[runAudit] competitor benchmark done, generating report`);
+
   const result = await generateReport(identity, gbp, website, social, press, competitorData);
 
   await emit({ type: "done", result });
+  console.log(`[runAudit] DONE total=${result.totalScore}`);
 
   return result;
 }

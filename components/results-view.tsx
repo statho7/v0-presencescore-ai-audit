@@ -88,9 +88,13 @@ export function ResultsView({ result, onReset }: ResultsViewProps) {
           />
           <div className="mt-6 rounded-2xl border border-border bg-card/40 p-6 md:p-8">
             <div className="space-y-5 text-pretty text-base leading-relaxed text-foreground/90">
-              {result.narrative.map((para, idx) => (
-                <p key={idx}>{para}</p>
-              ))}
+              {result.narrative
+                .filter((para) => !para.startsWith("#"))
+                .map((para, idx) => (
+                  <p key={idx}>
+                    {para.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1")}
+                  </p>
+                ))}
             </div>
           </div>
         </section>
