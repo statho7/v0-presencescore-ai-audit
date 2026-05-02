@@ -139,4 +139,10 @@ lib/
 
 ---
 
+## Loom Hackathon Submission Video
+
+[Watch the video](https://www.loom.com/share/3433a81d9bd3420aa40251149ba774ad)
+
+---
+
 <a href="https://v0.app/chat/api/kiro/clone/statho7/v0-presencescore-ai-audit" alt="Open in Kiro"><img src="https://pdgvvgmkdvyeydso.public.blob.vercel-storage.com/open%20in%20kiro.svg?sanitize=true" /></a>
