@@ -19,8 +19,11 @@ export type AuditEvent =
 
 const BD_API = "https://api.brightdata.com/request";
 
-async function serpSearch(query: string): Promise<string> {
-  console.log(`[serpSearch] query="${query}"`);
+async function serpSearch(query: string, news = false): Promise<string> {
+  console.log(`[serpSearch] query="${query}" news=${news}`);
+  const base = news
+    ? `https://www.google.com/search?q=${encodeURIComponent(query)}&gl=gb&hl=en&tbm=nws&num=10`
+    : `https://www.google.com/search?q=${encodeURIComponent(query)}&gl=gb&hl=en&num=10`;
   const res = await fetch(BD_API, {
     method: "POST",
     headers: {
@@ -29,7 +32,7 @@ async function serpSearch(query: string): Promise<string> {
     },
     body: JSON.stringify({
       zone: process.env.BRIGHTDATA_UNLOCKER_ZONE,
-      url: `https://www.google.com/search?q=${encodeURIComponent(query)}&gl=gb&hl=en&num=10`,
+      url: base,
       format: "raw",
     }),
   });
@@ -457,9 +460,16 @@ async function auditPress(identity: Identity): Promise<PressAudit> {
   console.log(`[auditPress] START name="${identity.canonicalName}"`);
   await emit({ type: "step_start", stepId: "press" });
 
-  // Include the address to avoid confusing this pub with other "Rose & Crown" pubs
-  const pressQuery = `"${identity.canonicalName}" "${identity.address.split(",")[0]}" London restaurant review OR feature site:theguardian.com OR timeout.com OR standard.co.uk OR telegraph.co.uk OR independent.co.uk`;
-  const raw = await serpSearch(pressQuery);
+  // Google News gives date-sorted press results without needing site: filters.
+  // Address is intentionally omitted — press articles name the restaurant, not the street.
+  // A second broader query catches food media not indexed in News (Eater, Hot Dinners etc).
+  const newsQuery = `"${identity.canonicalName}" London restaurant`;
+  const broadQuery = `"${identity.canonicalName}" London restaurant review (site:theguardian.com OR site:timeout.com OR site:standard.co.uk OR site:telegraph.co.uk OR site:independent.co.uk OR site:eater.com OR site:hotdinners.com)`;
+  const [newsRaw, broadRaw] = await Promise.all([
+    serpSearch(newsQuery, true),
+    serpSearch(broadQuery),
+  ]);
+  const raw = `=== GOOGLE NEWS ===\n${newsRaw}\n\n=== FOOD PRESS SERP ===\n${broadRaw}`;
 
   const pressSchema = z.object({
     articleCount: z.number(),
