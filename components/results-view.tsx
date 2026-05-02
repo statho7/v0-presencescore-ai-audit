@@ -44,29 +44,34 @@ export function ResultsView({ result, onReset, cachedAt }: ResultsViewProps) {
 
       <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-10 md:px-10 md:py-14">
         {/* Cached audit notice */}
-        {cachedAt && (
-          <div className="mb-6 flex items-start gap-3 rounded-xl border border-border bg-card/60 px-4 py-3 text-sm text-muted-foreground">
-            <Clock className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-            <span>
-              We found a recent audit for this restaurant from{" "}
-              <span className="font-medium text-foreground">
-                {new Date(cachedAt).toLocaleDateString("en-GB", {
-                  day: "numeric",
-                  month: "long",
-                  year: "numeric",
-                })}
+        {cachedAt && (() => {
+          const auditDate = new Date(cachedAt)
+          const nextAvailable = new Date(auditDate.getTime() + 7 * 24 * 60 * 60 * 1000)
+          return (
+            <div className="mb-6 flex items-start gap-3 rounded-xl border border-border bg-card/60 px-4 py-3 text-sm text-muted-foreground">
+              <Clock className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <span>
+                We found a recent audit for this restaurant from{" "}
+                <span className="font-medium text-foreground">
+                  {auditDate.toLocaleDateString("en-GB", {
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric",
+                  })}
+                </span>
+                {" "}— we did not re-run the audit as it is less than a week old. A fresh audit will be available from{" "}
+                <span className="font-medium text-foreground">
+                  {nextAvailable.toLocaleDateString("en-GB", {
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric",
+                  })}
+                </span>
+                .
               </span>
-              {" "}— we did not re-run the audit as it is less than a week old. Run a{" "}
-              <button
-                onClick={onReset}
-                className="underline underline-offset-2 hover:text-foreground transition-colors"
-              >
-                new audit
-              </button>{" "}
-              to get a fresh result.
-            </span>
-          </div>
-        )}
+            </div>
+          )
+        })()}
 
         {/* Score dial section */}
         <section className="rounded-2xl border border-border bg-card/40 p-6 md:p-10">
