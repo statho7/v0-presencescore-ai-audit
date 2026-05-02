@@ -22,18 +22,22 @@ const PAGE_SIZE = 5
 
 type CoverageTimelineProps = { articles: CoverageArticle[] }
 
-function buildLast8Quarters() {
+function buildQuarters(articles: CoverageArticle[]) {
   const now = new Date()
   const endYear = now.getFullYear()
   const endQ = Math.ceil((now.getMonth() + 1) / 3)
 
-  // Go back 7 more quarters to build exactly 8
-  let startQ = endQ - 7
-  let startYear = endYear
-  while (startQ < 1) {
-    startQ += 4
-    startYear--
-  }
+  // Start from earliest article date, minimum 8 quarters back
+  const minStart = new Date(now)
+  minStart.setMonth(minStart.getMonth() - 21) // ~7 quarters back = 8 total
+  const earliest = articles.reduce<Date>((min, a) => {
+    if (!a.date) return min
+    const d = new Date(a.date)
+    return d < min ? d : min
+  }, minStart)
+
+  let startYear = earliest.getFullYear()
+  let startQ = Math.ceil((earliest.getMonth() + 1) / 3)
 
   const quarters: { label: string; year: number; q: number }[] = []
   let year = startYear
@@ -72,7 +76,7 @@ function CustomTooltip({ active, payload, label }: any) {
 export function CoverageTimeline({ articles = [] }: CoverageTimelineProps) {
   const [page, setPage] = useState(0)
 
-  const quarters = useMemo(() => buildLast8Quarters(), [])
+  const quarters = useMemo(() => buildQuarters(articles), [articles])
 
   const data = useMemo(() => {
     return quarters.map(({ label, year, q }) => {
@@ -136,14 +140,15 @@ export function CoverageTimeline({ articles = [] }: CoverageTimelineProps) {
           ))}
         </div>
 
-        {/* Bar chart — fixed 8-quarter window */}
+        {/* Bar chart — spans full article history */}
         <ResponsiveContainer width="100%" height={180}>
-          <BarChart data={data} barSize={24} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+          <BarChart data={data} barSize={Math.max(8, Math.min(24, Math.floor(600 / quarters.length)))} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
             <XAxis
               dataKey="label"
               tick={{ fontSize: 11, fill: "oklch(0.68 0.01 270)" }}
               axisLine={false}
               tickLine={false}
+              interval={quarters.length > 16 ? Math.ceil(quarters.length / 8) - 1 : 0}
             />
             <YAxis
               allowDecimals={false}
