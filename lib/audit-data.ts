@@ -72,6 +72,15 @@ export type Competitor = {
   isYou?: boolean
 }
 
+export type CoverageArticle = {
+  title: string
+  source: string
+  date: string
+  url?: string
+  sentiment: "positive" | "neutral" | "negative"
+  tier: "tier1" | "tier2" | "tier3"
+}
+
 export type AuditResult = {
   restaurantName: string
   postcode: string
@@ -80,6 +89,7 @@ export type AuditResult = {
   quickWins: QuickWin[]
   narrative: string[]
   competitors: Competitor[]
+  articles: CoverageArticle[]
 }
 
 export function generateAuditResult(
@@ -208,6 +218,93 @@ export function generateAuditResult(
         gbpPhotos: 31,
         pressMentions: 3,
         bookingLink: false,
+      },
+    ],
+    articles: [
+      // Q3 2024
+      {
+        title: "The best new restaurant openings in London",
+        source: "Time Out",
+        date: "2024-08-12",
+        sentiment: "positive",
+        tier: "tier1",
+      },
+      {
+        title: "Where to dine in Mayfair this summer",
+        source: "Evening Standard",
+        date: "2024-07-22",
+        sentiment: "positive",
+        tier: "tier1",
+      },
+      // Q4 2024
+      {
+        title: "London's hidden dining gems",
+        source: "Eater London",
+        date: "2024-11-05",
+        sentiment: "neutral",
+        tier: "tier2",
+      },
+      {
+        title: "A critic's guide to Mayfair restaurants",
+        source: "Hot Dinners",
+        date: "2024-10-18",
+        sentiment: "positive",
+        tier: "tier2",
+      },
+      // Q1 2025
+      {
+        title: "Review: dinner in the heart of Mayfair",
+        source: "Square Meal",
+        date: "2025-02-14",
+        sentiment: "neutral",
+        tier: "tier3",
+      },
+      // Q2 2025
+      {
+        title: "The best Italian-influenced menus in London",
+        source: "The Guardian",
+        date: "2025-05-03",
+        sentiment: "positive",
+        tier: "tier1",
+      },
+      {
+        title: "Service issues mar an otherwise solid meal",
+        source: "Time Out",
+        date: "2025-06-11",
+        sentiment: "negative",
+        tier: "tier1",
+      },
+      // Q3 2025
+      {
+        title: "Mayfair dining: the definitive round-up",
+        source: "Evening Standard",
+        date: "2025-08-20",
+        sentiment: "positive",
+        tier: "tier1",
+      },
+      // Q4 2025
+      {
+        title: "Our favourite restaurants of 2025",
+        source: "Hot Dinners",
+        date: "2025-12-01",
+        sentiment: "positive",
+        tier: "tier2",
+      },
+      // Q1 2026
+      {
+        title: "Where to eat in London right now",
+        source: "Eater London",
+        date: "2026-01-29",
+        sentiment: "neutral",
+        tier: "tier2",
+      },
+      // Q2 2026
+      {
+        title: "Spring menus worth booking for",
+        source: "Square Meal",
+        date: "2026-04-10",
+        sentiment: "positive",
+        tier: "tier3",
       },
     ],
   }

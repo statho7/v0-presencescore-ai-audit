@@ -3,6 +3,7 @@
 import { Download, RotateCcw, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { CompetitorTable } from "@/components/competitor-table"
+import { CoverageTimeline } from "@/components/coverage-timeline"
 import { QuickWins } from "@/components/quick-wins"
 import { ScoreBars } from "@/components/score-bars"
 import { ScoreDial } from "@/components/score-dial"
@@ -64,6 +65,18 @@ export function ResultsView({ result, onReset }: ResultsViewProps) {
           />
           <div className="mt-6">
             <ScoreBars dimensions={result.dimensions} />
+          </div>
+        </section>
+
+        {/* Press coverage timeline */}
+        <section className="mt-10">
+          <SectionHeader
+            eyebrow="Press"
+            title="Coverage over time"
+            description="Articles by quarter, coloured by sentiment."
+          />
+          <div className="mt-6">
+            <CoverageTimeline articles={result.articles} />
           </div>
         </section>
 
