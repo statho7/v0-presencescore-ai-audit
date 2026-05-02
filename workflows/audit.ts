@@ -1,7 +1,7 @@
 import { getWritable, FatalError, RetryableError } from "workflow";
 import { generateText, Output } from "ai";
 import { z } from "zod";
-import type { AuditResult, QuickWin, Competitor, ScoreDimension } from "@/lib/audit-data";
+import type { AuditResult, QuickWin, Competitor, ScoreDimension, CoverageArticle } from "@/lib/audit-data";
 
 // ---------------------------------------------------------------------------
 // Event types streamed to the frontend
@@ -718,6 +718,30 @@ Separate the paragraphs from the JSON with the exact delimiter: ---JSON---`);
   await emit({ type: "step_done", stepId: "recommendations", log: `${quickWins.length} quick wins identified · Narrative generated` });
   console.log(`[generateReport] DONE total=${total} quickWins=${quickWins.length}`);
 
+  // Parse articleTitles strings (format: "Title (Source, DD Mon YYYY)") into CoverageArticle objects
+  const TIER1_SOURCES = ["guardian", "time out", "timeout", "evening standard", "telegraph", "independent"];
+  const articles: CoverageArticle[] = press.articleTitles.map((title): CoverageArticle => {
+    // Extract source and date from trailing "(Source, Date)" pattern
+    const match = title.match(/\(([^,]+),\s*([^)]+)\)\s*$/);
+    const source = match ? match[1].trim() : "Unknown";
+    const dateStr = match ? match[2].trim() : "";
+
+    // Parse the date — handle formats like "17 Nov 2022", "1 Sept 2016", "29 Oct 2025"
+    const parsed = dateStr ? new Date(dateStr) : null;
+    const isoDate = parsed && !isNaN(parsed.getTime())
+      ? parsed.toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+
+    const tier: CoverageArticle["tier"] = TIER1_SOURCES.some((s) =>
+      source.toLowerCase().includes(s)
+    ) ? "tier1" : "tier2";
+
+    const sentiment: CoverageArticle["sentiment"] = press.positiveSentiment ? "positive" : "neutral";
+
+    return { title: match ? title.slice(0, title.lastIndexOf("(")).trim() : title, source, date: isoDate, sentiment, tier };
+  });
+  console.log(`[generateReport] articles parsed=${articles.length}`);
+
   return {
     restaurantName: identity.canonicalName,
     postcode: identity.address,
@@ -726,6 +750,7 @@ Separate the paragraphs from the JSON with the exact delimiter: ---JSON---`);
     quickWins,
     narrative,
     competitors,
+    articles,
   };
 }
 
