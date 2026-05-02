@@ -19,11 +19,12 @@ export type AuditEvent =
 
 const BD_API = "https://api.brightdata.com/request";
 
-async function serpSearch(query: string, news = false): Promise<string> {
-  console.log(`[serpSearch] query="${query}" news=${news}`);
+async function serpSearch(query: string, news = false, sortByDate = false): Promise<string> {
+  console.log(`[serpSearch] query="${query}" news=${news} sortByDate=${sortByDate}`);
+  const dateParam = sortByDate ? "&tbs=sbd:1" : "";
   const base = news
-    ? `https://www.google.com/search?q=${encodeURIComponent(query)}&gl=gb&hl=en&tbm=nws&num=100`
-    : `https://www.google.com/search?q=${encodeURIComponent(query)}&gl=gb&hl=en&num=100`;
+    ? `https://www.google.com/search?q=${encodeURIComponent(query)}&gl=gb&hl=en&tbm=nws&num=100${dateParam}`
+    : `https://www.google.com/search?q=${encodeURIComponent(query)}&gl=gb&hl=en&num=100${dateParam}`;
   const res = await fetch(BD_API, {
     method: "POST",
     headers: {
@@ -462,14 +463,18 @@ async function auditPress(identity: Identity): Promise<PressAudit> {
   console.log(`[auditPress] START name="${identity.canonicalName}"`);
   await emit({ type: "step_start", stepId: "press" });
 
-  // Google News gives date-sorted press results without needing site: filters.
-  // Address is intentionally omitted — press articles name the restaurant, not the street.
-  // A second broader query catches food media not indexed in News (Eater, Hot Dinners etc).
-  const newsQuery = `"${identity.canonicalName}" London restaurant`;
-  const broadQuery = `"${identity.canonicalName}" London restaurant review (site:theguardian.com OR site:timeout.com OR site:standard.co.uk OR site:telegraph.co.uk OR site:independent.co.uk OR site:eater.com OR site:hotdinners.com)`;
+  // Strip generic venue-type words so "BRAT Restaurant" → "BRAT" — press articles say "Brat", not "BRAT Restaurant"
+  const pressName = identity.canonicalName
+    .replace(/\s+(restaurant|bar|café|cafe|bistro|brasserie|kitchen|grill|pub|eatery|dining)\s*$/i, "")
+    .trim() || identity.canonicalName;
+
+  // Google News sorted newest-first. Second query covers food media not in News (Eater, Hot Dinners etc), also newest-first.
+  const newsQuery = `"${pressName}" London restaurant`;
+  const broadQuery = `"${pressName}" London restaurant review (site:theguardian.com OR site:timeout.com OR site:standard.co.uk OR site:telegraph.co.uk OR site:independent.co.uk OR site:eater.com OR site:hotdinners.com)`;
+  console.log(`[auditPress] pressName="${pressName}" newsQuery="${newsQuery}"`);
   const [newsRaw, broadRaw] = await Promise.all([
-    serpSearch(newsQuery, true),
-    serpSearch(broadQuery),
+    serpSearch(newsQuery, true, true),
+    serpSearch(broadQuery, false, true),
   ]);
   const raw = `=== GOOGLE NEWS ===\n${newsRaw}\n\n=== FOOD PRESS SERP ===\n${broadRaw}`;
 
