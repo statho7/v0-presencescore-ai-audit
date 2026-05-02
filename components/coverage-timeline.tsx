@@ -20,15 +20,27 @@ const TIER_LABEL: Record<CoverageArticle["tier"], string> = {
 
 type CoverageTimelineProps = { articles: CoverageArticle[] }
 
-function buildQuarters() {
+function buildQuarters(articles: CoverageArticle[]) {
   const now = new Date()
+  const endYear = now.getFullYear()
+  const endQ = Math.ceil((now.getMonth() + 1) / 3)
+
+  // Find earliest article date; fall back to 2 years ago
+  const earliest = articles.reduce<Date>((min, a) => {
+    const d = new Date(a.date)
+    return d < min ? d : min
+  }, new Date(now.getFullYear() - 2, now.getMonth(), 1))
+
+  let startYear = earliest.getFullYear()
+  let startQ = Math.ceil((earliest.getMonth() + 1) / 3)
+
   const quarters: { label: string; year: number; q: number }[] = []
-  let year = now.getFullYear()
-  let q = Math.ceil((now.getMonth() + 1) / 3)
-  for (let i = 0; i < 8; i++) {
-    quarters.unshift({ label: `Q${q} '${String(year).slice(2)}`, year, q })
-    q--
-    if (q === 0) { q = 4; year-- }
+  let year = startYear
+  let q = startQ
+  while (year < endYear || (year === endYear && q <= endQ)) {
+    quarters.push({ label: `Q${q} '${String(year).slice(2)}`, year, q })
+    q++
+    if (q > 4) { q = 1; year++ }
   }
   return quarters
 }
@@ -56,7 +68,7 @@ function CustomTooltip({ active, payload, label }: any) {
 }
 
 export function CoverageTimeline({ articles = [] }: CoverageTimelineProps) {
-  const quarters = useMemo(() => buildQuarters(), [])
+  const quarters = useMemo(() => buildQuarters(articles), [articles])
 
   const data = useMemo(() => {
     return quarters.map(({ label, year, q }) => {
