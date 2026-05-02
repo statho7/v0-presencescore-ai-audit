@@ -1,6 +1,7 @@
 import { neon } from "@neondatabase/serverless"
 import type { AuditResult } from "@/lib/audit-data"
 import { nameMatches, normalizeName, normalizePostcode } from "@/lib/normalize"
+import { findMatchingAudit } from "@/lib/dedupe-agent"
 
 if (!process.env.DATABASE_URL) {
   // We don't throw at import time so that build-time pre-rendering doesn't blow
@@ -69,11 +70,15 @@ export async function auditExists(runId: string): Promise<boolean> {
 }
 
 /**
- * Returns the most recent audit for a restaurant created within the last
- * `withinDays` days, using fuzzy matching that's tolerant of:
- *   - "BRAT" vs "BRAT Restaurant" (stopwords stripped, substring match)
- *   - "E1 6JL" vs "4 Redchurch St, London E1 6JL" (postcode extracted)
- *   - whitespace / case variations on either side
+ * Returns the most recent audit (within `withinDays`) that refers to the same
+ * restaurant as the user's input. Uses a two-stage match:
+ *   1. Deterministic fast-path — exact normalized postcode match + fuzzy
+ *      normalized-name substring match. Free, sub-millisecond, catches the
+ *      common case ("BRAT" / "E1 6JL" → "BRAT Restaurant" / full address).
+ *   2. AI fallback — if the fast-path misses but recent rows exist, ask an
+ *      LLM whether the user's input refers to any of them. Catches edge cases
+ *      the deterministic check can't (e.g. abbreviations, near-postcode
+ *      matches, alternate spellings).
  * Returns null if no recent match is found.
  */
 export async function getRecentAuditByRestaurant(
@@ -86,33 +91,62 @@ export async function getRecentAuditByRestaurant(
   const postcodeNorm = normalizePostcode(postcode)
   const nameNorm = normalizeName(restaurantName)
 
-  // If we can't extract a postcode from the user's input we have no reliable
-  // anchor and fall back to just letting the audit run.
-  if (!postcodeNorm || !nameNorm) {
-    console.log(
-      `[db.getRecentAuditByRestaurant] skip: cannot normalize input name="${restaurantName}" postcode="${postcode}"`,
+  // Pull all recent rows once — used by both the deterministic check and the
+  // AI fallback so we make a single DB round-trip.
+  const recentRows = (await sql`
+    SELECT run_id, restaurant_name, postcode, result, created_at, postcode_normalized, name_normalized
+    FROM audits
+    WHERE created_at >= NOW() - (${withinDays} || ' days')::interval
+    ORDER BY created_at DESC
+    LIMIT 25
+  `) as Array<AuditRow & { postcode_normalized: string | null; name_normalized: string | null }>
+
+  // 1) Deterministic fast-path: same normalized postcode + fuzzy name match.
+  if (postcodeNorm && nameNorm) {
+    const sameArea = recentRows.filter((r) => r.postcode_normalized === postcodeNorm)
+    const hit = sameArea.find((row) =>
+      nameMatches(nameNorm, row.name_normalized ?? normalizeName(row.restaurant_name)),
     )
+    if (hit) {
+      console.log(
+        `[db.getRecentAuditByRestaurant] deterministic HIT runId=${hit.run_id} (postcodeNorm="${postcodeNorm}" nameNorm="${nameNorm}")`,
+      )
+      return hit
+    }
+  }
+
+  // 2) AI fallback. Only run if we have at least one recent row to compare to.
+  if (recentRows.length === 0) {
+    console.log(`[db.getRecentAuditByRestaurant] no recent rows in last ${withinDays}d`)
     return null
   }
 
-  // Pull recent rows for the same postcode, then do the fuzzy name match in JS
-  // (cheap because most postcodes will have at most 1-2 matching rows).
-  const rows = (await sql`
-    SELECT run_id, restaurant_name, postcode, result, created_at, postcode_normalized, name_normalized
-    FROM audits
-    WHERE postcode_normalized = ${postcodeNorm}
-      AND created_at >= NOW() - (${withinDays} || ' days')::interval
-    ORDER BY created_at DESC
-    LIMIT 10
-  `) as Array<AuditRow & { postcode_normalized: string | null; name_normalized: string | null }>
-
-  const hit = rows.find((row) => nameMatches(nameNorm, row.name_normalized ?? normalizeName(row.restaurant_name)))
-
   console.log(
-    `[db.getRecentAuditByRestaurant] postcodeNorm="${postcodeNorm}" nameNorm="${nameNorm}" candidates=${rows.length} hit=${hit?.run_id ?? "none"}`,
+    `[db.getRecentAuditByRestaurant] deterministic MISS — asking AI across ${recentRows.length} candidates`,
   )
 
-  return hit ?? null
+  try {
+    const decision = await findMatchingAudit(
+      restaurantName,
+      postcode,
+      recentRows.map((r) => ({
+        runId: r.run_id,
+        restaurantName: r.restaurant_name,
+        postcode: r.postcode,
+        createdAt: r.created_at,
+      })),
+    )
+
+    console.log(
+      `[db.getRecentAuditByRestaurant] AI decision matchedRunId=${decision.matchedRunId} confidence=${decision.confidence} reasoning="${decision.reasoning}"`,
+    )
+
+    if (!decision.matchedRunId) return null
+    return recentRows.find((r) => r.run_id === decision.matchedRunId) ?? null
+  } catch (err) {
+    console.error("[db.getRecentAuditByRestaurant] AI fallback failed, allowing rerun:", err)
+    return null
+  }
 }
 
 export async function saveAudit(
