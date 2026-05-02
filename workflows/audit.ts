@@ -70,11 +70,25 @@ async function unlockUrl(url: string): Promise<string> {
 }
 
 async function getInstagramProfile(handle: string): Promise<string> {
-  // Instagram's HTML is almost entirely JS bundles — scraping the page directly yields
-  // no readable data even at 8000 chars. Instead, search Google for the profile which
-  // returns a knowledge-panel snippet with follower counts, post counts etc.
-  console.log(`[getInstagramProfile] handle="${handle}" (via Google SERP)`);
-  return serpSearch(`site:instagram.com ${handle} followers posts`);
+  // Try fetching the profile page directly first — Bright Data's Web Unlocker
+  // can render JS and return HTML that contains the follower count in meta tags
+  // and the page title. Fall back to SERP if the direct fetch yields no data.
+  console.log(`[getInstagramProfile] handle="${handle}" (direct fetch + SERP fallback)`);
+
+  try {
+    const html = await unlockUrl(`https://www.instagram.com/${handle}/`);
+    // Instagram embeds follower count in og:description meta tag and page title
+    // e.g. "2,828 Followers, 899 Following, 267 Posts"
+    const hasMeta = html.includes("Followers") || html.includes("followers");
+    console.log(`[getInstagramProfile] direct fetch length=${html.length} hasMeta=${hasMeta}`);
+    if (hasMeta) return html;
+  } catch (err) {
+    console.log(`[getInstagramProfile] direct fetch failed: ${err}`);
+  }
+
+  // Fallback: Google SERP knowledge panel
+  console.log(`[getInstagramProfile] falling back to SERP`);
+  return serpSearch(`"${handle}" instagram followers site:instagram.com OR instagram.com`);
 }
 
 // ---------------------------------------------------------------------------
@@ -206,8 +220,26 @@ async function auditGbp(identity: Identity): Promise<GbpAudit> {
   console.log(`[auditGbp] START name="${identity.canonicalName}" photos=${identity.gbpPhotos} reviews=${identity.gbpReviews}`);
   await emit({ type: "step_start", stepId: "gbp" });
 
-  // Dedicated GBP signals search — Google Maps knowledge panel often shows photo count
-  const raw = await serpSearch(`"${identity.canonicalName}" "${identity.address.split(",")[0]}" photos reviews Google Maps`);
+  // Search Google Maps directly — the knowledge panel page includes "X photos" text
+  const mapsQuery = `${identity.canonicalName} ${identity.address.split(",")[0]} London site:google.com/maps`;
+  const serpData = await serpSearch(mapsQuery);
+
+  // Also fetch the Google Maps listing page if we can find the URL in the SERP
+  const mapsUrlMatch = serpData.match(/google\.com\/maps\/place\/[^\s"']+/);
+  let mapsPageData = "";
+  if (mapsUrlMatch) {
+    try {
+      const mapsUrl = `https://${mapsUrlMatch[0]}`;
+      console.log(`[auditGbp] fetching Google Maps page url="${mapsUrl}"`);
+      mapsPageData = await unlockUrl(mapsUrl);
+      const hasPhotos = mapsPageData.includes("photo") || mapsPageData.includes("Photo");
+      console.log(`[auditGbp] Maps page length=${mapsPageData.length} hasPhotos=${hasPhotos}`);
+    } catch (err) {
+      console.log(`[auditGbp] Maps page fetch failed: ${err}`);
+    }
+  }
+
+  const raw = `SERP:\n${serpData}\n\nMaps page:\n${mapsPageData}`.slice(0, 8000);
 
   const gbpSchema = z.object({
     gbpClaimed: z.boolean(),
@@ -219,19 +251,19 @@ async function auditGbp(identity: Identity): Promise<GbpAudit> {
     specificCategory: z.boolean(),
   });
 
-  const audit = await askStructured("gbp", `Analyse this Google SERP data to audit a restaurant's Google Business Profile.
+  const audit = await askStructured("gbp", `Analyse Google data to audit a restaurant's Google Business Profile.
 
 Restaurant: ${identity.canonicalName}, ${identity.address}
 Known signals:
 - Rating: ${identity.gbpRating} stars, Reviews: ${identity.gbpReviews}, Has hours: ${identity.hasHours}, Has booking link: ${identity.hasBookingLink}
 
-SERP data: ${raw}
+Data (SERP + Maps page): ${raw}
 
 Rules:
 - gbpClaimed: true because reviews=${identity.gbpReviews} > 0
 - inLocalPack: true if the restaurant appears in a map/local pack
-- photoCount: look for "X photos", "X images", "See all X photos" patterns. If not found use ${identity.gbpPhotos}
-- hasBookingLink: true if SERP mentions Reserve, Book, OpenTable, Resy, SevenRooms — or use ${identity.hasBookingLink}
+- photoCount: scan for ANY number followed by "photo", "photos", "image", "images", or "See all". Also look for patterns like "Photos (123)" or "123 photos added". If genuinely not found, use ${identity.gbpPhotos}
+- hasBookingLink: true if Reserve, Book, OpenTable, Resy, SevenRooms appears — or use ${identity.hasBookingLink}
 - hasMenuLink: true if a menu URL or "Menu" link appears
 - specificCategory: true if a specific cuisine type appears (Pub, British, Thai, Italian etc)`, gbpSchema);
   console.log(`[auditGbp] parsed audit=${JSON.stringify(audit)}`);
@@ -375,17 +407,22 @@ No JSON, no markdown — just the raw handle string or empty string.`);
     tiktokExists: z.boolean(),
   });
 
-  const audit = await askStructured("instagram", `Extract Instagram presence data for a London restaurant from this Google search snippet.
+  const audit = await askStructured("instagram", `Extract Instagram presence data for a London restaurant from this page data.
 
 Handle: @${handle}
-Google search snippet (from searching Instagram profile on Google): ${html}
+Page data (may be raw HTML from instagram.com or a Google SERP snippet): ${html}
 
 Rules:
 - instagramLinked: true since we have a handle
-- followers: extract from "2,828 followers" or "2.8K followers" patterns (convert K to thousands). Use 0 if not found.
-- postsLast30Days: estimate from post count if shown, otherwise use 4 as a reasonable default for an active account
-- hasReels: true if Reels tab or reel content is mentioned
-- engagementAboveMedian: true if strong engagement signals appear (high like counts relative to followers)
+- followers: look for ALL of these patterns (pick whichever appears):
+    * In meta tags: content="2,828 Followers" or og:description containing "X Followers"
+    * In page title: "theringse1 • Instagram" plus a nearby follower figure
+    * Plain text: "2,828 followers", "2.8K followers", "2.8k Followers"
+    * JSON-LD or script data: "follower_count":2828
+    Convert any K/M suffix to the full integer (2.8K → 2800). Use 0 only if truly absent.
+- postsLast30Days: look for post count (267 posts) and estimate recency; default 4 if unclear
+- hasReels: true if "Reels" tab, reel icon, or reel content is mentioned
+- engagementAboveMedian: true if strong engagement signals appear relative to follower count
 - tiktokExists: true if a TikTok account for this restaurant is mentioned`, socialSchema);
   console.log(`[auditInstagram] parsed audit=${JSON.stringify(audit)}`);
 
