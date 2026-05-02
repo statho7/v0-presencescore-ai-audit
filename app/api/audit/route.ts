@@ -13,6 +13,9 @@ export async function POST(req: Request) {
   // Check if a recent audit (< 7 days old) already exists for this restaurant.
   const recent = await getRecentAuditByRestaurant(restaurantName, postcode);
   if (recent) {
+    console.log(
+      `[api/audit] CACHE HIT name="${restaurantName}" postcode="${postcode}" -> runId=${recent.run_id} createdAt=${recent.created_at}`,
+    );
     return NextResponse.json({
       runId: recent.run_id,
       cached: true,
@@ -21,6 +24,7 @@ export async function POST(req: Request) {
     });
   }
 
+  console.log(`[api/audit] CACHE MISS — starting workflow name="${restaurantName}" postcode="${postcode}"`);
   const run = await start(runAudit, [restaurantName, postcode]);
   return NextResponse.json({ runId: run.runId, cached: false });
 }
