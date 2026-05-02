@@ -1,11 +1,11 @@
 # PresenceScore — Build Status & Gap Tracker
-### Last updated: 2026-05-02
+### Last updated: 2026-05-02 (session 2)
 
 ---
 
 ## Overall Assessment
 
-**~97% MVP-complete.** All 8 pipeline steps working end-to-end with real external data. Full UI built including coverage timeline with pagination. PDF generation merged and live. Scoring model fully aligned with brief. Press pipeline significantly improved (date-sorted, venue-suffix-aware, up to 100 results). One scoring signal (engagement above median) structurally deferred.
+**~99% MVP-complete. Verified working end-to-end on Vercel production.** All 8 pipeline steps live with real external data. Full UI built and verified. PDF download working via browser print (window.print() + print CSS — no server dependency). One scoring signal (engagement above median) structurally deferred. Press recency now computed from extracted ISO dates (not Claude inference). Article links resolved from SERP HTML.
 
 ---
 
@@ -14,10 +14,10 @@
 | Step | Brief spec | Status | Notes |
 |------|-----------|--------|-------|
 | Identity resolution | Name, address, GBP URL, competitor set | ✅ Working | SERP → Claude structured output |
-| GBP audit | Claimed, photos, hours, booking, 3-pack | ✅ Working | Photo count inferred from reviews (see below) |
+| GBP audit | Claimed, photos, hours, booking, 3-pack | ✅ Working | Photo count inferred from reviews |
 | Website audit | Loads, mobile, booking, schema, menu, allergen | ✅ Working | HTML scraped via Bright Data Web Unlocker |
 | Instagram audit | Account, followers, frequency, reels, engagement | ✅ Working | Direct fetch → SERP fallback; `postedLast14Days` + `customerInstagramPosts` extracted |
-| Press coverage | Google News scrape, sentiment, tier classification | ✅ Working | Dual SERP (news + site-filtered), date-sorted newest-first, up to 100 results, per-article source/date/url extracted |
+| Press coverage | Google News scrape, sentiment, tier classification | ✅ Working | Dual SERP (news + site-filtered), date-sorted, up to 100 results, per-article source/date/url extracted |
 | Competitor benchmark | 5 nearest venues, side-by-side scoring | ✅ Working | Single SERP + structured output |
 | Score calculation | 6 dimensions, 0–100 | ✅ Working | Matches brief's weighting exactly |
 | Narrative + quick wins | 3 paragraphs + top 3 actions | ✅ Working | Claude-generated, no parse errors |
@@ -37,7 +37,7 @@
 | Coverage article list | ✅ Built | Paginated (5/page), sentiment dot, tier badge, external link |
 | Competitor comparison table | ✅ Built | User row highlighted |
 | Quick wins cards | ✅ Built | Action, time estimate, impact points, icon mapping |
-| PDF download | ✅ Built & Merged | Puppeteer via `@sparticuz/chromium`, loading state, real A4 PDF |
+| PDF download | ✅ Built & Working | `window.print()` + `@media print` CSS — no server dependency, works on Vercel |
 
 ---
 
@@ -48,7 +48,7 @@
 | `POST /api/audit` | ✅ Working | Starts durable workflow, returns `runId` |
 | `GET /api/audit/run/[runId]` | ✅ Working | Returns workflow status + metadata |
 | `GET /api/audit/readable/[runId]` | ✅ Working | SSE stream of step events to frontend |
-| `POST /api/pdf` | ✅ Working | Server-side PDF via puppeteer-core + @sparticuz/chromium |
+| `POST /api/pdf` | ⚠️ Unused | Route still exists but frontend now uses window.print() |
 
 ---
 
@@ -59,7 +59,7 @@
 |--------|-------|-------------|-----|
 | GBP claimed and active | 4pts | ✅ 4pts | — |
 | Appears in local 3-pack | 5pts | ✅ 5pts | — |
-| 50+ photos on GBP | 3pts | ✅ 3pts (inferred) | Photo count inferred from review count — see Known Limitations |
+| 50+ photos on GBP | 3pts | ✅ 3pts (inferred) | Photo count inferred from review count |
 | Hours set | 2pts | ✅ 2pts | — |
 | Menu link on GBP | 2pts | ✅ 2pts | — |
 | Category specific | 2pts | ✅ 2pts | — |
@@ -73,7 +73,7 @@
 | Booking widget | 4pts | ✅ 4pts | — |
 | Schema.org markup | 3pts | ✅ 3pts | — |
 | Allergen info | 2pts | ✅ 2pts | — |
-| Social links on site | 2pts | ⚠️ possible 2pts | First 6KB truncation may miss social links in footer |
+| Social links on site | 2pts | ⚠️ possible 2pts | First 6KB truncation may miss footer links |
 | About/story page | 2pts | ✅ 2pts | — |
 
 ### Social (15pts)
@@ -88,8 +88,8 @@
 ### Press (25pts)
 | Signal | Brief | Implemented | Gap |
 |--------|-------|-------------|-----|
-| Any coverage in 12 months | 5pts | ✅ 5pts | `anyCoverageIn12Months` boolean evaluated by Claude |
-| 3+ articles in 12 months | 5pts | ⚠️ improving | Now date-sorted + up to 100 results; still relies on Claude counting recent articles |
+| Any coverage in 12 months | 5pts | ✅ 5pts | Computed from extracted `articleDates` filtered to last 12 months |
+| 3+ articles in 12 months | 5pts | ✅ 5pts | Same — falls back to Claude count when no dates available |
 | Tier 1 source | 5pts | ✅ 5pts | — |
 | Positive sentiment | 5pts | ✅ 5pts | — |
 | No negative in top 10 | 5pts | ✅ 5pts | — |
@@ -97,84 +97,70 @@
 ### UGC (10pts)
 | Signal | Brief | Implemented | Gap |
 |--------|-------|-------------|-----|
-| 10+ customer Instagram posts tagging location | 5pts | ✅ Implemented | Uses `customerInstagramPosts` extracted from Instagram SERP data |
-| Any TikTok UGC mentions | 3pts | ❌ 0pts | V2 — no TikTok data source |
-| Reddit/community mentions | 2pts | ❌ 0pts | V2 — no Reddit SERP step |
-
-**Note:** `customerInstagramPosts` is estimated by Claude from SERP data — a reasonable proxy but not a direct count. Tiered: ≥10 → 5pts, ≥3 → 2pts, fallback to follower tiers.
+| 10+ customer Instagram posts tagging location | 5pts | ✅ Implemented | Estimated by Claude from SERP — reasonable proxy |
+| Any TikTok UGC mentions | 3pts | ❌ 0pts | V2 |
+| Reddit/community mentions | 2pts | ❌ 0pts | V2 |
 
 ### Competitive Context (10pts)
 | Signal | Brief | Implemented | Gap |
 |--------|-------|-------------|-----|
-| Relative rank vs. local competitors | 10pts linear scale | ✅ Implemented | Score calculated against competitor average |
+| Relative rank vs. local competitors | 10pts linear scale | ✅ Implemented | — |
 
 ---
 
 ## Known Limitations
 
 ### GBP Photo Count — Cannot Scrape
-Google Maps photo counts are JS-rendered; no static HTML or SERP snippet exposes them.
-
-**Current approach**: Infer from review count:
-- ≥500 reviews → `reviews × 0.15` photos
-- ≥100 reviews → `reviews × 0.10` photos
-- <100 reviews → 0
-
-Shown in UI as `~269 photos (inferred)`. Reasonable proxy for scoring.
+Google Maps photo counts are JS-rendered. Inferred from review count: ≥500 reviews → `reviews × 0.15` photos; ≥100 → `× 0.10`; <100 → 0.
 
 ### Instagram Direct Fetch — Meta Tags Past Truncation Limit
-Bright Data returns 913KB of HTML; follower `og:description` appears past the 6,000-char truncation. Falls back to SERP knowledge panel — currently working correctly.
-
-**Fix if SERP stops working**: Increase `unlockUrl` truncation limit to 12,000 chars for Instagram URLs.
-
-### Press Article Recency — Established Restaurants Show Historical Coverage
-For restaurants with peak press at launch (e.g. Brat, 2018), SERP results still skew toward high-backlink old articles even with date-sort. The `anyCoverageIn12Months` signal depends on Claude correctly interpreting the snippet dates.
-
-**Mitigated by**: `&tbs=sbd:1` (sort by date) on both press queries + venue-suffix stripping so `"BRAT"` not `"BRAT Restaurant"` is matched.
+Falls back to SERP knowledge panel — currently working. Fix if SERP stops: increase `unlockUrl` truncation limit to 12,000 chars for Instagram URLs.
 
 ### Engagement Rate — No Borough Benchmark
-The "engagement above borough median" signal (4pts) requires a reference dataset. No borough-level Instagram engagement data exists in the system. Always scores 0pts.
+The 4pt "engagement above borough median" signal requires a reference dataset. Always 0pts. Needs static lookup table or accumulated audit history.
 
 ---
 
 ## Implemented vs V2 Roadmap
 
-### In MVP (shipped on main)
+### In MVP (shipped & verified on Vercel)
 - [x] Input form: restaurant name + postcode
-- [x] GBP audit via Bright Data SERP (claimed, photos inferred, hours, booking, 3-pack)
-- [x] Website scrape (HTML menu, booking widget, schema, allergen, about page)
+- [x] Full 8-step durable audit pipeline (Vercel Workflow SDK)
+- [x] GBP audit via Bright Data SERP
+- [x] Website scrape
 - [x] Instagram audit — `postedLast14Days`, `customerInstagramPosts`, followers, reels
-- [x] Press coverage — dual SERP (Google News + site-filtered), date-sorted, up to 100 results, per-article source/date/url/sentiment/tier
-- [x] Coverage timeline chart — dynamic quarter range, stacked bar by sentiment, paginated article list (5/page)
+- [x] Press coverage — dual SERP, date-sorted, up to 100 results, per-article data with URLs extracted from SERP HTML
+- [x] Coverage timeline chart — dynamic quarter range, paginated article list
 - [x] 5 nearest competitor benchmarks
-- [x] Score calculation (6 dimensions, 0–100, matches brief exactly)
+- [x] Score calculation (6 dimensions, 0–100)
 - [x] Claude-generated narrative + 3 quick wins
-- [x] Dashboard UI — score dial, dimension bars, coverage timeline, competitor table, quick wins
+- [x] Full dashboard UI — score dial, dimension bars, timeline, competitor table, quick wins
 - [x] EventSource SSE streaming — live step progress
-- [x] Durable workflow — each step independently retryable (Vercel Workflow SDK)
 - [x] Structured outputs throughout — no `JSON.parse` fragility
 - [x] Error handling — `FatalError`, `RetryableError`, retry logic for 429s
-- [x] PDF generation — `POST /api/pdf`, Puppeteer A4, loading state on button
+- [x] PDF download — `window.print()` + `@media print` CSS, verified working
 
 ### Deferred to V2
-- [ ] TikTok audit (account, followers, video frequency, viral outliers)
-- [ ] TikTok UGC mentions (non-restaurant posts — 3pts of UGC score)
-- [ ] Reddit/community mentions (r/london, r/londonFood — 2pts of UGC score)
-- [ ] Engagement above borough median (4pts of Social score — needs benchmark data)
-- [ ] Web Archive historical depth (3+ years of coverage timeline)
-- [ ] Weekly monitoring workflow with alerts (durable sleep/wake/diff)
+- [ ] TikTok audit
+- [ ] TikTok + Reddit UGC (5pts combined)
+- [ ] Engagement above borough median (4pts)
+- [x] Compute press recency from dates (not Claude inference) — shipped
+- [ ] Web Archive historical depth
+- [ ] Weekly monitoring workflow
 - [ ] White-label agency mode
 - [ ] Bulk CSV upload
-- [ ] Neon database persistence (enables monitoring and borough benchmark data)
+- [ ] Neon database persistence
 
 ---
 
-## Next Steps (Demo Prep)
+## Pre-Submission Checklist
 
-| Priority | What | Why |
-|----------|------|-----|
-| High | Run live audit of **Brat (EC2A 3JL)** on deployed Vercel URL | Validate demo script end-to-end on production |
-| High | Verify PDF renders correctly on deployed URL | PDF route requires Node.js runtime + Chromium — confirm Vercel provisioned correctly |
-| Medium | Test a restaurant with no Instagram / no website | Confirm graceful degradation and sensible scores at the edges |
-| Medium | Add `anyCoverageIn12Months` date-awareness to press step | Currently Claude infers this from snippets; could be anchored to today's date explicitly |
-| Low | Consider Reddit SERP step for UGC mentions | 2pts — small effort, broadens earned presence signals |
+| # | Action | Status |
+|---|--------|--------|
+| 1 | All pipeline steps verified on Vercel prod | ✅ Done |
+| 2 | PDF download verified | ✅ Done (window.print) |
+| 3 | Run live Brat audit on prod, record real scores | ⬜ Do this |
+| 4 | Update demo script to match real Brat numbers | ⬜ After #3 |
+| 5 | Test graceful degradation (no Instagram / no website) | ⬜ Optional |
+| 6 | Fix `anyCoverageIn12Months` to compute from dates | ✅ Done |
+| 7 | Hackathon submission write-up | ⬜ Do this |
