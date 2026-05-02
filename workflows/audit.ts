@@ -19,7 +19,7 @@ export type AuditEvent =
 
 const BD_API = "https://api.brightdata.com/request";
 
-async function serpSearch(query: string, news = false, sortByDate = false): Promise<string> {
+async function serpSearch(query: string, news = false, sortByDate = false, includeUrls = false): Promise<string> {
   console.log(`[serpSearch] query="${query}" news=${news} sortByDate=${sortByDate}`);
   const dateParam = sortByDate ? "&tbs=sbd:1" : "";
   const base = news
@@ -40,14 +40,32 @@ async function serpSearch(query: string, news = false, sortByDate = false): Prom
   if (res.status === 429) throw new RetryableError("Bright Data rate limited", { retryAfter: "30s" });
   if (!res.ok) throw new FatalError(`Google search failed: ${res.status}`);
   const html = await res.text();
+
+  // Extract article URLs from href attributes before stripping HTML
+  let urlSection = "";
+  if (includeUrls) {
+    const redirectMatches = [...html.matchAll(/href="\/url\?q=(https?:\/\/[^&"]+)/g)];
+    let urls = redirectMatches.map(m => { try { return decodeURIComponent(m[1]); } catch { return m[1]; } });
+    // Fallback for Google News which uses direct hrefs instead of redirect URLs
+    if (urls.length === 0) {
+      const directMatches = [...html.matchAll(/href="(https?:\/\/(?!(?:www\.|accounts\.|support\.|policies\.)google\.)[^"]+)"/g)];
+      urls = directMatches.map(m => m[1]);
+    }
+    const deduped = [...new Set(urls)].filter(u => !u.includes("google.com")).slice(0, 50);
+    if (deduped.length > 0) {
+      urlSection = "\n\n[ARTICLE URLS]\n" + deduped.map((u, i) => `${i + 1}. ${u}`).join("\n") + "\n[/ARTICLE URLS]";
+      console.log(`[serpSearch] extracted ${deduped.length} URLs`);
+    }
+  }
+
   const text = html
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
     .replace(/<[^>]+>/g, " ")
     .replace(/\s{2,}/g, " ")
     .trim();
-  const truncated = text.slice(0, 8000);
-  console.log(`[serpSearch] raw text length=${text.length} truncated=${truncated.length} preview="${truncated.slice(0, 300)}"`);
+  const truncated = (text.slice(0, 8000) + urlSection);
+  console.log(`[serpSearch] raw text length=${text.length} truncated=${truncated.length} preview="${text.slice(0, 300)}"`);
   return truncated;
 }
 
@@ -473,8 +491,8 @@ async function auditPress(identity: Identity): Promise<PressAudit> {
   const broadQuery = `"${pressName}" London restaurant review (site:theguardian.com OR site:timeout.com OR site:standard.co.uk OR site:telegraph.co.uk OR site:independent.co.uk OR site:eater.com OR site:hotdinners.com)`;
   console.log(`[auditPress] pressName="${pressName}" newsQuery="${newsQuery}"`);
   const [newsRaw, broadRaw] = await Promise.all([
-    serpSearch(newsQuery, true, true),
-    serpSearch(broadQuery, false, true),
+    serpSearch(newsQuery, true, true, true),
+    serpSearch(broadQuery, false, true, true),
   ]);
   const raw = `=== GOOGLE NEWS ===\n${newsRaw}\n\n=== FOOD PRESS SERP ===\n${broadRaw}`;
 
@@ -505,7 +523,7 @@ Rules:
 - articleTitles: clean article title only (no source name, no date)
 - articleSources: publication name for each article in the same order (e.g. "The Guardian", "Time Out", "Eater London"); use "Unknown" only if genuinely absent
 - articleDates: ISO date string (YYYY-MM-DD) for each article in the same order; infer from URL slugs (e.g. /2023/04/ → "2023-04-01"), snippet dates, or "ago" text (e.g. "3 years ago" from today 2026-05-02); use "" if truly unknown
-- articleUrls: the direct URL for each article in the same order as articleTitles; use "" if unknown`, pressSchema);
+- articleUrls: for each article, use the matching URL from the [ARTICLE URLS] section in the SERP data (match by domain or title keywords); use "" only if no matching URL can be found`, pressSchema);
   console.log(`[auditPress] parsed audit=${JSON.stringify(audit)}`);
 
   const log = `${audit.articleCount} article${audit.articleCount !== 1 ? "s" : ""} found · ${audit.tier1Coverage ? "Tier-1 coverage" : "No tier-1"} · ${audit.positiveSentiment ? "Positive sentiment" : "Mixed/negative sentiment"}`;
