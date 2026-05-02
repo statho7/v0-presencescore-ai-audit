@@ -352,6 +352,8 @@ type SocialAudit = {
   instagramLinked: boolean;
   followers: number;
   postsLast30Days: number;
+  postedLast14Days: boolean;
+  customerInstagramPosts: number;
   hasReels: boolean;
   engagementAboveMedian: boolean;
   tiktokExists: boolean;
@@ -387,6 +389,8 @@ No JSON, no markdown — just the raw handle string or empty string.`);
       instagramLinked: false,
       followers: 0,
       postsLast30Days: 0,
+      postedLast14Days: false,
+      customerInstagramPosts: 0,
       hasReels: false,
       engagementAboveMedian: false,
       tiktokExists: false,
@@ -400,6 +404,8 @@ No JSON, no markdown — just the raw handle string or empty string.`);
     instagramLinked: z.boolean(),
     followers: z.number(),
     postsLast30Days: z.number(),
+    postedLast14Days: z.boolean(),
+    customerInstagramPosts: z.number(),
     hasReels: z.boolean(),
     engagementAboveMedian: z.boolean(),
     tiktokExists: z.boolean(),
@@ -419,6 +425,8 @@ Rules:
     * JSON-LD or script data: "follower_count":2828
     Convert any K/M suffix to the full integer (2.8K → 2800). Use 0 only if truly absent.
 - postsLast30Days: look for post count (267 posts) and estimate recency; default 4 if unclear
+- postedLast14Days: true if the account appears to have posted within the last 14 days
+- customerInstagramPosts: estimate how many third-party (non-restaurant) posts mention or tag this venue on Instagram — look for location tag counts, tagged post mentions, or any signal of customer-generated content. Use 0 if no signal found.
 - hasReels: true if "Reels" tab, reel icon, or reel content is mentioned
 - engagementAboveMedian: true if strong engagement signals appear relative to follower count
 - tiktokExists: true if a TikTok account for this restaurant is mentioned`, socialSchema);
@@ -562,7 +570,7 @@ function calculateScore(
 
   const socialScore =
     (social.instagramLinked ? 2 : 0) +
-    (social.postsLast30Days >= 4 ? 3 : 0) +
+    (social.postedLast14Days ? 3 : 0) +
     (social.hasReels ? 3 : 0) +
     (social.engagementAboveMedian ? 4 : 0) +
     (social.tiktokExists ? 3 : 0);
@@ -574,12 +582,13 @@ function calculateScore(
     (press.positiveSentiment ? 5 : 0) +
     (press.noNegativeInTopResults ? 5 : 0);
 
-  // UGC: Instagram followers are the primary signal. Fall back to GBP review count
-  // (reviews correlate strongly with customer photo-tagging and UGC volume).
-  const ugcSource = social.followers > 0
-    ? social.followers
-    : (gbpReviews > 500 ? 5000 : gbpReviews > 100 ? 2000 : 0);
-  const ugc = Math.min(10, Math.round(ugcSource / 1000));
+  // UGC: customer-generated Instagram posts are the strongest signal of organic
+  // presence. Fall back to follower count tiers when no customer-post signal is found.
+  const ugc =
+    social.customerInstagramPosts >= 10 ? 5 :
+    social.customerInstagramPosts >= 3  ? 2 :
+    social.followers >= 5000            ? 3 :
+    social.followers >= 1000            ? 1 : 0;
 
   const avgCompetitorScore =
     competitors.length > 0
