@@ -101,9 +101,17 @@ export async function getRecentAuditByRestaurant(
     LIMIT 25
   `) as Array<AuditRow & { postcode_normalized: string | null; name_normalized: string | null }>
 
-  // 1) Deterministic fast-path: same normalized postcode + fuzzy name match.
+  // 1) Deterministic fast-path: same area + fuzzy name match.
+  //
+  // Match by postcode prefix rather than strict equality — this lets the
+  // competitor benchmark flow look up rows by district ("SE1") and still hit
+  // audits saved with a full postcode ("SE19AB"). When the caller supplies a
+  // full postcode, the prefix match collapses back to an exact comparison
+  // because both strings have the same length.
   if (postcodeNorm && nameNorm) {
-    const sameArea = recentRows.filter((r) => r.postcode_normalized === postcodeNorm)
+    const sameArea = recentRows.filter(
+      (r) => r.postcode_normalized != null && r.postcode_normalized.startsWith(postcodeNorm),
+    )
     const hit = sameArea.find((row) =>
       nameMatches(nameNorm, row.name_normalized ?? normalizeName(row.restaurant_name)),
     )

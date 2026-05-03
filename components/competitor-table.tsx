@@ -16,7 +16,14 @@ export function CompetitorTable({ competitors }: CompetitorTableProps) {
           <thead className="border-b border-border bg-background/30">
             <tr className="text-left">
               <Th>Restaurant</Th>
-              <Th align="right">Score</Th>
+              <Th align="right">
+                <span title="Competitor scores are shown as 10-point ranges to account for pipeline estimation variance.">
+                  Score{" "}
+                  <span className="font-normal normal-case tracking-normal text-muted-foreground/60">
+                    (range)
+                  </span>
+                </span>
+              </Th>
               <Th align="right">GBP photos</Th>
               <Th align="right">Press mentions</Th>
               <Th align="center">Booking link</Th>
@@ -57,7 +64,7 @@ export function CompetitorTable({ competitors }: CompetitorTableProps) {
                       getScoreTone(c.score),
                     )}
                   >
-                    {c.score}
+                    {c.isYou ? c.score : (c.scoreRange ?? c.score)}
                   </span>
                 </td>
                 <td className="px-4 py-3.5 text-right font-mono tabular-nums text-muted-foreground">
