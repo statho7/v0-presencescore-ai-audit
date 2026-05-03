@@ -20,6 +20,7 @@ export function RunningView({ restaurantName, postcode, runId, onComplete }: Run
   const [stepStatuses, setStepStatuses] = useState<Record<string, StepStatus>>({})
   const [stepLogs, setStepLogs] = useState<Record<string, string>>({})
   const [fatalError, setFatalError] = useState<string | null>(null)
+  const [isReconnecting, setIsReconnecting] = useState(false)
   const onCompleteRef = useRef(onComplete)
   onCompleteRef.current = onComplete
 
@@ -27,7 +28,47 @@ export function RunningView({ restaurantName, postcode, runId, onComplete }: Run
   const progress = Math.round((completedCount / AUDIT_STEPS.length) * 100)
 
   useEffect(() => {
-    const es = new EventSource(`/api/audit/readable/${runId}`)
+    let es: EventSource | null = null
+    let pollTimerId: ReturnType<typeof setTimeout> | null = null
+    let done = false
+
+    function cleanup() {
+      done = true
+      es?.close()
+      if (pollTimerId) clearTimeout(pollTimerId)
+    }
+
+    async function pollForCompletion() {
+      if (done) return
+      try {
+        const runRes = await fetch(`/api/audit/run/${runId}`)
+        if (runRes.ok) {
+          const run = await runRes.json()
+          if (run.status === "completed") {
+            const resultRes = await fetch(`/api/audit/result/${runId}`)
+            if (resultRes.ok) {
+              const data = await resultRes.json()
+              if (data.result) {
+                done = true
+                setIsReconnecting(false)
+                onCompleteRef.current(data.result)
+                return
+              }
+            }
+          } else if (run.status === "failed") {
+            setFatalError("Audit failed. Please try again.")
+            return
+          }
+        }
+      } catch {
+        // network error, keep polling
+      }
+      if (!done) {
+        pollTimerId = setTimeout(pollForCompletion, 3000)
+      }
+    }
+
+    es = new EventSource(`/api/audit/readable/${runId}`)
 
     es.onmessage = (e) => {
       let event: AuditEvent
@@ -46,17 +87,22 @@ export function RunningView({ restaurantName, postcode, runId, onComplete }: Run
         setStepStatuses((prev) => ({ ...prev, [event.stepId]: "error" }))
         setStepLogs((prev) => ({ ...prev, [event.stepId]: event.error }))
       } else if (event.type === "done") {
-        es.close()
+        done = true
+        es?.close()
         onCompleteRef.current(event.result)
       }
     }
 
     es.onerror = () => {
-      es.close()
-      setFatalError("Connection to audit server lost. Please try again.")
+      es?.close()
+      es = null
+      if (!done) {
+        setIsReconnecting(true)
+        pollTimerId = setTimeout(pollForCompletion, 2000)
+      }
     }
 
-    return () => es.close()
+    return cleanup
   }, [runId])
 
   if (fatalError) {
@@ -84,7 +130,7 @@ export function RunningView({ restaurantName, postcode, runId, onComplete }: Run
           <div className="mb-8 flex flex-col items-center text-center">
             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-3 py-1 font-mono text-xs text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin text-primary" />
-              Auditing
+              {isReconnecting ? "Finishing up…" : "Auditing"}
             </div>
             <h1 className="text-balance text-2xl font-semibold tracking-tight md:text-3xl">
               Running PresenceScore for{" "}

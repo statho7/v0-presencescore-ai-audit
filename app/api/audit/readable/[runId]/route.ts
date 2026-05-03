@@ -3,6 +3,8 @@ import { getRun } from "workflow/api";
 import { auditExists, saveAudit } from "@/lib/db";
 import type { AuditResult } from "@/lib/audit-data";
 
+export const maxDuration = 300;
+
 type Context = { params: Promise<{ runId: string }> };
 
 export async function GET(_req: NextRequest, { params }: Context) {

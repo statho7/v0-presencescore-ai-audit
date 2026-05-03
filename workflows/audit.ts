@@ -686,110 +686,116 @@ function extractBookingLink(result: AuditResult): boolean {
   return (result as AuditResult & { _bookingLink?: boolean })._bookingLink ?? false;
 }
 
+async function benchmarkSingleCompetitor(
+  name: string,
+  postcode: string,
+  district: string,
+): Promise<CompetitorData> {
+  "use step";
+  console.log(`[benchmarkSingleCompetitor] START name="${name}" postcode="${postcode}"`);
+
+  try {
+    const cached = await getRecentAuditByRestaurant(name, district);
+    if (cached) {
+      console.log(`[benchmarkSingleCompetitor] CACHE HIT name="${name}" runId=${cached.run_id}`);
+      const r = cached.result;
+      return {
+        name: r.restaurantName,
+        score: r.totalScore,
+        gbpPhotos: extractGbpPhotos(r),
+        pressMentions: extractPressMentions(r),
+        bookingLink: extractBookingLink(r),
+      };
+    }
+  } catch (err) {
+    console.log(`[benchmarkSingleCompetitor] cache lookup failed for "${name}": ${err}`);
+  }
+
+  console.log(`[benchmarkSingleCompetitor] CACHE MISS — full audit for "${name}"`);
+  try {
+    const identity = await _resolveIdentity(name, postcode);
+    const [gbp, web, social, press] = await Promise.allSettled([
+      _runGbpAudit(identity),
+      _runWebsiteAudit(identity),
+      _runInstagramAudit(identity),
+      _runPressAudit(identity),
+    ]);
+
+    const gbpData = gbp.status === "fulfilled" ? gbp.value : defaultGbpAudit;
+    const webData = web.status === "fulfilled" ? web.value : defaultWebAudit;
+    const socialData = social.status === "fulfilled" ? social.value : defaultSocialAudit;
+    const pressData = press.status === "fulfilled" ? press.value : defaultPressAudit;
+
+    const { dimensions, total } = calculateScore(
+      gbpData,
+      webData,
+      socialData,
+      pressData,
+      [],
+      0,
+      identity.gbpReviews,
+    );
+
+    const competitorResult: AuditResult & {
+      _gbpPhotoCount: number;
+      _pressMentions: number;
+      _bookingLink: boolean;
+    } = {
+      restaurantName: identity.canonicalName,
+      postcode: identity.address,
+      totalScore: total,
+      dimensions,
+      quickWins: [],
+      narrative: [],
+      competitors: [],
+      articles: [],
+      _gbpPhotoCount: gbpData.photoCount,
+      _pressMentions: pressData.articleCount,
+      _bookingLink: gbpData.hasBookingLink,
+    };
+
+    const competitorRunId = `competitor_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      await saveAudit(competitorRunId, identity.canonicalName, identity.address, competitorResult);
+    } catch (saveErr) {
+      console.log(`[benchmarkSingleCompetitor] saveAudit failed for "${name}": ${saveErr}`);
+    }
+
+    console.log(`[benchmarkSingleCompetitor] DONE name="${identity.canonicalName}" score=${total}`);
+    return {
+      name: identity.canonicalName,
+      score: total,
+      gbpPhotos: gbpData.photoCount,
+      pressMentions: pressData.articleCount,
+      bookingLink: gbpData.hasBookingLink,
+    };
+  } catch (err) {
+    console.log(`[benchmarkSingleCompetitor] FAILED for "${name}": ${err}`);
+    return { name, score: 0, gbpPhotos: 0, pressMentions: 0, bookingLink: false };
+  }
+}
+
 async function benchmarkCompetitorsFull(
   competitors: string[],
   postcode: string,
 ): Promise<CompetitorData[]> {
-  "use step";
   console.log(`[benchmarkCompetitorsFull] START competitors=${JSON.stringify(competitors)} postcode="${postcode}"`);
   await emit({ type: "step_start", stepId: "competitors" });
 
   const names = competitors.slice(0, 5);
-  // Competitors live in the same postcode district as the main restaurant but
-  // typically have a different specific postcode. Look up by the outward code
-  // ("SE1" from "SE1 8HA") so the deterministic cache match (which now does
-  // prefix matching on `postcode_normalized`) hits any prior audit in the same
-  // district — including ones saved from a different main-flow restaurant.
+  // Look up by the outward code ("SE1" from "SE1 8HA") so the deterministic
+  // cache match hits any prior audit in the same district.
   const district = postcode.split(" ")[0];
-  const results: CompetitorData[] = [];
 
-  for (const name of names) {
-    // 1. Check DB cache first (7-day TTL, same as main restaurant)
-    try {
-      const cached = await getRecentAuditByRestaurant(name, district);
-      if (cached) {
-        console.log(`[benchmarkCompetitorsFull] CACHE HIT name="${name}" runId=${cached.run_id}`);
-        const r = cached.result;
-        results.push({
-          name: r.restaurantName,
-          score: r.totalScore,
-          gbpPhotos: extractGbpPhotos(r),
-          pressMentions: extractPressMentions(r),
-          bookingLink: extractBookingLink(r),
-        });
-        continue;
-      }
-    } catch (err) {
-      console.log(`[benchmarkCompetitorsFull] cache lookup failed for "${name}": ${err}`);
-      // Fall through to a fresh audit on cache lookup failure.
-    }
+  const settled = await Promise.allSettled(
+    names.map((name) => benchmarkSingleCompetitor(name, postcode, district)),
+  );
 
-    // 2. Cache miss — run the full pipeline for this competitor.
-    console.log(`[benchmarkCompetitorsFull] CACHE MISS — full audit for "${name}"`);
-    try {
-      const identity = await _resolveIdentity(name, postcode);
-      const [gbp, web, social, press] = await Promise.allSettled([
-        _runGbpAudit(identity),
-        _runWebsiteAudit(identity),
-        _runInstagramAudit(identity),
-        _runPressAudit(identity),
-      ]);
-
-      const gbpData = gbp.status === "fulfilled" ? gbp.value : defaultGbpAudit;
-      const webData = web.status === "fulfilled" ? web.value : defaultWebAudit;
-      const socialData = social.status === "fulfilled" ? social.value : defaultSocialAudit;
-      const pressData = press.status === "fulfilled" ? press.value : defaultPressAudit;
-
-      const { dimensions, total } = calculateScore(
-        gbpData,
-        webData,
-        socialData,
-        pressData,
-        [],
-        0,
-        identity.gbpReviews,
-      );
-
-      // Build a minimal AuditResult so we can store it in the audits table.
-      const competitorResult: AuditResult & {
-        _gbpPhotoCount: number;
-        _pressMentions: number;
-        _bookingLink: boolean;
-      } = {
-        restaurantName: identity.canonicalName,
-        postcode: identity.address,
-        totalScore: total,
-        dimensions,
-        quickWins: [],
-        narrative: [],
-        competitors: [],
-        articles: [],
-        _gbpPhotoCount: gbpData.photoCount,
-        _pressMentions: pressData.articleCount,
-        _bookingLink: gbpData.hasBookingLink,
-      };
-
-      // Save to the audits table — no user_pipeline_runs entry (not charged).
-      const competitorRunId = `competitor_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      try {
-        await saveAudit(competitorRunId, identity.canonicalName, identity.address, competitorResult);
-      } catch (saveErr) {
-        console.log(`[benchmarkCompetitorsFull] saveAudit failed for "${name}": ${saveErr}`);
-      }
-
-      results.push({
-        name: identity.canonicalName,
-        score: total,
-        gbpPhotos: gbpData.photoCount,
-        pressMentions: pressData.articleCount,
-        bookingLink: gbpData.hasBookingLink,
-      });
-    } catch (err) {
-      console.log(`[benchmarkCompetitorsFull] FAILED for "${name}": ${err}`);
-      // Fall back to a zero-data entry so the table still has a row.
-      results.push({ name, score: 0, gbpPhotos: 0, pressMentions: 0, bookingLink: false });
-    }
-  }
+  const results: CompetitorData[] = settled.map((r, i) =>
+    r.status === "fulfilled"
+      ? r.value
+      : { name: names[i], score: 0, gbpPhotos: 0, pressMentions: 0, bookingLink: false },
+  );
 
   const log = `${results.length} competitors fully audited (${results.filter((r) => r.score > 0).length} with data)`;
   console.log(`[benchmarkCompetitorsFull] DONE log="${log}"`);
