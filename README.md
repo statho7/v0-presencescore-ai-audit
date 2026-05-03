@@ -6,7 +6,7 @@ Enter a name and postcode — a durable 8-step agent pulls live data from Google
 
 Built with the [Vercel Workflow SDK](https://vercel.com/docs/workflow-sdk) for durable resumable execution, [Claude Sonnet](https://anthropic.com) for structured insight, and [Bright Data](https://brightdata.com) for real-time web scraping.
 
-**Live demo:** [v0-presencescore-ai-audit.vercel.app](https://v0-presencescore-ai-audit.vercel.app) — try auditing BRAT Restaurant, E1 6JL.
+**Live demo:** [www.presencescore.co.uk](https://www.presencescore.co.uk/)— try auditing BRAT Restaurant, E1 6JL.
 
 ---
 
