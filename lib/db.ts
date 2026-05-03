@@ -149,6 +149,80 @@ export async function getRecentAuditByRestaurant(
   }
 }
 
+export const FREE_PIPELINE_RUNS = 2
+
+let usersSchemaReady: Promise<void> | null = null
+
+export function ensureUsersTable(): Promise<void> {
+  if (!usersSchemaReady) {
+    usersSchemaReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS users (
+          id         TEXT PRIMARY KEY,
+          email      TEXT UNIQUE NOT NULL,
+          name       TEXT,
+          image      TEXT,
+          provider   TEXT NOT NULL,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `
+      await sql`
+        CREATE TABLE IF NOT EXISTS user_pipeline_runs (
+          id         SERIAL PRIMARY KEY,
+          user_id    TEXT NOT NULL REFERENCES users(id),
+          run_id     TEXT NOT NULL,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `
+      await sql`
+        CREATE INDEX IF NOT EXISTS user_pipeline_runs_user_id_idx
+          ON user_pipeline_runs (user_id)
+      `
+    })().catch((err) => {
+      usersSchemaReady = null
+      throw err
+    })
+  }
+  return usersSchemaReady
+}
+
+export async function upsertUser(
+  id: string,
+  email: string,
+  name: string | null,
+  image: string | null,
+  provider: string,
+): Promise<void> {
+  await ensureUsersTable()
+  await sql`
+    INSERT INTO users (id, email, name, image, provider)
+    VALUES (${id}, ${email}, ${name}, ${image}, ${provider})
+    ON CONFLICT (id) DO UPDATE SET
+      email = EXCLUDED.email,
+      name = EXCLUDED.name,
+      image = EXCLUDED.image,
+      provider = EXCLUDED.provider
+  `
+}
+
+export async function getUserPipelineRunCount(userId: string): Promise<number> {
+  await ensureUsersTable()
+  const rows = (await sql`
+    SELECT COUNT(*)::int AS count
+    FROM user_pipeline_runs
+    WHERE user_id = ${userId}
+  `) as Array<{ count: number }>
+  return rows[0]?.count ?? 0
+}
+
+export async function recordUserPipelineRun(userId: string, runId: string): Promise<void> {
+  await ensureUsersTable()
+  await sql`
+    INSERT INTO user_pipeline_runs (user_id, run_id)
+    VALUES (${userId}, ${runId})
+  `
+}
+
 export async function saveAudit(
   runId: string,
   restaurantName: string,
