@@ -1,7 +1,8 @@
 "use client"
 
+import Link from "next/link"
 import { signIn, signOut, useSession } from "next-auth/react"
-import { Github } from "lucide-react"
+import { Github, History } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 
@@ -55,6 +56,16 @@ export function AuthButton() {
 
   return (
     <div className="flex items-center gap-3 text-sm">
+      <Link
+        href="/history"
+        className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <History className="h-3.5 w-3.5" />
+        {/* Visible label on >=sm; sr-only fallback keeps the icon-only mobile
+            rendering accessible to screen-reader users. */}
+        <span className="hidden sm:inline">History</span>
+        <span className="sr-only sm:hidden">History</span>
+      </Link>
       {session.user.image ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img

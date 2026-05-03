@@ -93,10 +93,17 @@ export async function getRecentAuditByRestaurant(
 
   // Pull all recent rows once — used by both the deterministic check and the
   // AI fallback so we make a single DB round-trip.
+  //
+  // We exclude rows whose run_id starts with "competitor_" — those are
+  // benchmark snapshots saved by `benchmarkSingleCompetitor` with partial
+  // AuditResults (no quick wins, narrative or articles). Returning one as a
+  // cache hit would render an incomplete report and pollute the user's
+  // history with a broken entry.
   const recentRows = (await sql`
     SELECT run_id, restaurant_name, postcode, result, created_at, postcode_normalized, name_normalized
     FROM audits
     WHERE created_at >= NOW() - (${withinDays} || ' days')::interval
+      AND run_id NOT LIKE 'competitor\\_%' ESCAPE '\\'
     ORDER BY created_at DESC
     LIMIT 25
   `) as Array<AuditRow & { postcode_normalized: string | null; name_normalized: string | null }>
@@ -182,9 +189,17 @@ export function ensureUsersTable(): Promise<void> {
           created_at TIMESTAMPTZ DEFAULT NOW()
         )
       `
+      // `cached = TRUE` rows are audits the user viewed via a cache hit — they
+      // don't consume the user's quota, but they DO show up in the user's
+      // history so they can re-open the report later.
+      await sql`ALTER TABLE user_pipeline_runs ADD COLUMN IF NOT EXISTS cached BOOLEAN NOT NULL DEFAULT FALSE`
       await sql`
         CREATE INDEX IF NOT EXISTS user_pipeline_runs_user_id_idx
           ON user_pipeline_runs (user_id)
+      `
+      await sql`
+        CREATE UNIQUE INDEX IF NOT EXISTS user_pipeline_runs_user_run_uniq
+          ON user_pipeline_runs (user_id, run_id)
       `
     })().catch((err) => {
       usersSchemaReady = null
@@ -215,20 +230,83 @@ export async function upsertUser(
 
 export async function getUserPipelineRunCount(userId: string): Promise<number> {
   await ensureUsersTable()
+  // Only "real" (non-cached) runs count against the user's free-audit quota.
   const rows = (await sql`
     SELECT COUNT(*)::int AS count
     FROM user_pipeline_runs
-    WHERE user_id = ${userId}
+    WHERE user_id = ${userId} AND cached = FALSE
   `) as Array<{ count: number }>
   return rows[0]?.count ?? 0
 }
 
-export async function recordUserPipelineRun(userId: string, runId: string): Promise<void> {
+export async function recordUserPipelineRun(
+  userId: string,
+  runId: string,
+  cached = false,
+): Promise<void> {
   await ensureUsersTable()
+  // Upsert semantics:
+  //   - First time the user touches a run: insert a fresh row.
+  //   - Revisit (cache hit on something they've seen before): bump the
+  //     timestamp so the row floats to the top of their history list.
+  // We deliberately preserve the original `cached` flag — once a run has
+  // been counted against quota (cached=false), revisits must NOT flip it
+  // back to true and grant a free audit.
   await sql`
-    INSERT INTO user_pipeline_runs (user_id, run_id)
-    VALUES (${userId}, ${runId})
+    INSERT INTO user_pipeline_runs (user_id, run_id, cached)
+    VALUES (${userId}, ${runId}, ${cached})
+    ON CONFLICT (user_id, run_id) DO UPDATE
+      SET created_at = NOW()
   `
+}
+
+export type UserAuditHistoryRow = {
+  run_id: string
+  restaurant_name: string
+  postcode: string
+  total_score: number | null
+  accessed_at: string
+  cached: boolean
+}
+
+/**
+ * Returns every audit the user has run or viewed (via cache hit), most recent
+ * first.
+ *
+ * Implementation notes:
+ *   - INNER JOIN `audits`: we only surface runs that have a persisted report.
+ *     In-flight runs (status=running) and failed workflows that never wrote
+ *     to `audits` are intentionally excluded — there's no report to link to.
+ *     Failed runs still consume quota at start time, which is by design:
+ *     the quota is a rate-limit on attempts, not on successes.
+ *   - Excludes `competitor_*` runs as a defensive layer; they should never
+ *     reach `user_pipeline_runs` in the first place because cache lookup
+ *     filters them out, but if a stale row exists it shouldn't render.
+ *   - Default limit of 200 is well above the 2-free-audit quota plus
+ *     plausible repeat cache views; pagination would be premature.
+ */
+export async function getUserAuditHistory(
+  userId: string,
+  limit = 200,
+): Promise<UserAuditHistoryRow[]> {
+  await ensureUsersTable()
+  await ensureAuditsTable()
+  const rows = (await sql`
+    SELECT
+      a.run_id          AS run_id,
+      a.restaurant_name AS restaurant_name,
+      a.postcode        AS postcode,
+      (a.result->>'totalScore')::int AS total_score,
+      upr.created_at    AS accessed_at,
+      upr.cached        AS cached
+    FROM user_pipeline_runs upr
+    JOIN audits a ON a.run_id = upr.run_id
+    WHERE upr.user_id = ${userId}
+      AND a.run_id NOT LIKE 'competitor\\_%' ESCAPE '\\'
+    ORDER BY upr.created_at DESC
+    LIMIT ${limit}
+  `) as UserAuditHistoryRow[]
+  return rows
 }
 
 export async function saveAudit(

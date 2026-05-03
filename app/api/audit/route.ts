@@ -50,6 +50,23 @@ export async function POST(req: Request) {
     console.log(
       `[api/audit] CACHE HIT name="${restaurantName}" postcode="${postcode}" -> runId=${recent.run_id} createdAt=${recent.created_at}`,
     );
+    // Record the cache hit under the current user so it shows up in their
+    // history. `cached=true` ensures it doesn't consume their free-audit
+    // quota, and the upsert bumps the access time so revisits move to the
+    // top of the history list.
+    //
+    // We deliberately swallow errors here: history bookkeeping must never
+    // break a successful read. If the write fails (transient DB issue,
+    // schema not yet migrated, etc.) we still want to return the cached
+    // report the user asked for.
+    try {
+      await recordUserPipelineRun(userId, recent.run_id, true);
+    } catch (err) {
+      console.error(
+        `[api/audit] failed to record cache-hit history for runId=${recent.run_id}:`,
+        err,
+      );
+    }
     return NextResponse.json({
       runId: recent.run_id,
       cached: true,
