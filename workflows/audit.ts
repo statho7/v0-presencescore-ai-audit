@@ -117,25 +117,48 @@ async function getInstagramProfile(handle: string): Promise<string> {
 // AI Gateway call
 // ---------------------------------------------------------------------------
 
+function isGatewayRateLimit(err: unknown): boolean {
+  if (err instanceof Error) {
+    return err.constructor.name === "GatewayRateLimitError" || err.message.includes("rate limit") || err.message.includes("Free credits");
+  }
+  return false;
+}
+
 async function askStructured<T>(label: string, prompt: string, schema: z.ZodType<T>): Promise<T> {
   console.log(`[askStructured] label="${label}" prompt length=${prompt.length}`);
-  const { output } = await generateText({
-    model: "anthropic/claude-sonnet-4.6",
-    output: Output.object({ schema }),
-    prompt,
-  });
-  console.log(`[askStructured] label="${label}" output=${JSON.stringify(output).slice(0, 200)}`);
-  return output;
+  try {
+    const { output } = await generateText({
+      model: "anthropic/claude-sonnet-4.6",
+      output: Output.object({ schema }),
+      prompt,
+    });
+    console.log(`[askStructured] label="${label}" output=${JSON.stringify(output).slice(0, 200)}`);
+    return output;
+  } catch (err) {
+    if (isGatewayRateLimit(err)) {
+      console.log(`[askStructured] label="${label}" gateway rate limited — retrying in 15s`);
+      throw new RetryableError("AI Gateway rate limited", { retryAfter: "15s" });
+    }
+    throw err;
+  }
 }
 
 async function askClaude(label: string, prompt: string): Promise<string> {
   console.log(`[askClaude] label="${label}" prompt length=${prompt.length}`);
-  const { text } = await generateText({
-    model: "anthropic/claude-sonnet-4.6",
-    prompt,
-  });
-  console.log(`[askClaude] label="${label}" response length=${text.length} preview="${text.slice(0, 200)}"`);
-  return text;
+  try {
+    const { text } = await generateText({
+      model: "anthropic/claude-sonnet-4.6",
+      prompt,
+    });
+    console.log(`[askClaude] label="${label}" response length=${text.length} preview="${text.slice(0, 200)}"`);
+    return text;
+  } catch (err) {
+    if (isGatewayRateLimit(err)) {
+      console.log(`[askClaude] label="${label}" gateway rate limited — retrying in 15s`);
+      throw new RetryableError("AI Gateway rate limited", { retryAfter: "15s" });
+    }
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------
