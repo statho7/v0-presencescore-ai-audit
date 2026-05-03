@@ -50,6 +50,10 @@ export async function POST(req: Request) {
     console.log(
       `[api/audit] CACHE HIT name="${restaurantName}" postcode="${postcode}" -> runId=${recent.run_id} createdAt=${recent.created_at}`,
     );
+    // Record the cache hit under the current user so it shows up in their
+    // history. `cached=true` ensures it doesn't consume their free-audit
+    // quota, and the underlying insert is idempotent on (user_id, run_id).
+    await recordUserPipelineRun(userId, recent.run_id, true);
     return NextResponse.json({
       runId: recent.run_id,
       cached: true,

@@ -1,6 +1,7 @@
 "use client";
 
-import { Download, RotateCcw, Sparkles, Clock } from "lucide-react";
+import Link from "next/link";
+import { Download, RotateCcw, Sparkles, Clock, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CompetitorTable } from "@/components/competitor-table";
 import { CoverageTimeline } from "@/components/coverage-timeline";
@@ -30,15 +31,27 @@ export function ResultsView({ result, onReset, cachedAt }: ResultsViewProps) {
             </div>
             <span className="font-mono tracking-tight">PresenceScore</span>
           </button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onReset}
-            className="gap-2 text-muted-foreground hover:text-foreground"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-            New audit
-          </Button>
+          <div className="flex items-center gap-1">
+            <Link href="/history">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-2 text-muted-foreground hover:text-foreground"
+              >
+                <History className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">History</span>
+              </Button>
+            </Link>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onReset}
+              className="gap-2 text-muted-foreground hover:text-foreground"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">New audit</span>
+            </Button>
+          </div>
         </div>
       </header>
 

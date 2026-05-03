@@ -182,9 +182,17 @@ export function ensureUsersTable(): Promise<void> {
           created_at TIMESTAMPTZ DEFAULT NOW()
         )
       `
+      // `cached = TRUE` rows are audits the user viewed via a cache hit — they
+      // don't consume the user's quota, but they DO show up in the user's
+      // history so they can re-open the report later.
+      await sql`ALTER TABLE user_pipeline_runs ADD COLUMN IF NOT EXISTS cached BOOLEAN NOT NULL DEFAULT FALSE`
       await sql`
         CREATE INDEX IF NOT EXISTS user_pipeline_runs_user_id_idx
           ON user_pipeline_runs (user_id)
+      `
+      await sql`
+        CREATE UNIQUE INDEX IF NOT EXISTS user_pipeline_runs_user_run_uniq
+          ON user_pipeline_runs (user_id, run_id)
       `
     })().catch((err) => {
       usersSchemaReady = null
@@ -215,20 +223,65 @@ export async function upsertUser(
 
 export async function getUserPipelineRunCount(userId: string): Promise<number> {
   await ensureUsersTable()
+  // Only "real" (non-cached) runs count against the user's free-audit quota.
   const rows = (await sql`
     SELECT COUNT(*)::int AS count
     FROM user_pipeline_runs
-    WHERE user_id = ${userId}
+    WHERE user_id = ${userId} AND cached = FALSE
   `) as Array<{ count: number }>
   return rows[0]?.count ?? 0
 }
 
-export async function recordUserPipelineRun(userId: string, runId: string): Promise<void> {
+export async function recordUserPipelineRun(
+  userId: string,
+  runId: string,
+  cached = false,
+): Promise<void> {
   await ensureUsersTable()
+  // Idempotent: if the user has already accessed this run, do nothing — we
+  // keep the original row (and its `cached` flag) so quota stays correct.
   await sql`
-    INSERT INTO user_pipeline_runs (user_id, run_id)
-    VALUES (${userId}, ${runId})
+    INSERT INTO user_pipeline_runs (user_id, run_id, cached)
+    VALUES (${userId}, ${runId}, ${cached})
+    ON CONFLICT (user_id, run_id) DO NOTHING
   `
+}
+
+export type UserAuditHistoryRow = {
+  run_id: string
+  restaurant_name: string
+  postcode: string
+  total_score: number | null
+  accessed_at: string
+  cached: boolean
+}
+
+/**
+ * Returns every audit the user has run or viewed (via cache hit), most recent
+ * first. Joins `user_pipeline_runs` to `audits` so we only return runs that
+ * have actually been persisted (i.e. completed). In-flight runs are excluded.
+ */
+export async function getUserAuditHistory(
+  userId: string,
+  limit = 50,
+): Promise<UserAuditHistoryRow[]> {
+  await ensureUsersTable()
+  await ensureAuditsTable()
+  const rows = (await sql`
+    SELECT
+      a.run_id          AS run_id,
+      a.restaurant_name AS restaurant_name,
+      a.postcode        AS postcode,
+      (a.result->>'totalScore')::int AS total_score,
+      upr.created_at    AS accessed_at,
+      upr.cached        AS cached
+    FROM user_pipeline_runs upr
+    JOIN audits a ON a.run_id = upr.run_id
+    WHERE upr.user_id = ${userId}
+    ORDER BY upr.created_at DESC
+    LIMIT ${limit}
+  `) as UserAuditHistoryRow[]
+  return rows
 }
 
 export async function saveAudit(
