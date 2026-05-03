@@ -61,7 +61,10 @@ export function AuthButton() {
         className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
         <History className="h-3.5 w-3.5" />
+        {/* Visible label on >=sm; sr-only fallback keeps the icon-only mobile
+            rendering accessible to screen-reader users. */}
         <span className="hidden sm:inline">History</span>
+        <span className="sr-only sm:hidden">History</span>
       </Link>
       {session.user.image ? (
         // eslint-disable-next-line @next/next/no-img-element

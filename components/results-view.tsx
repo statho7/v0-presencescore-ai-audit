@@ -32,16 +32,23 @@ export function ResultsView({ result, onReset, cachedAt }: ResultsViewProps) {
             <span className="font-mono tracking-tight">PresenceScore</span>
           </button>
           <div className="flex items-center gap-1">
-            <Link href="/history">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="gap-2 text-muted-foreground hover:text-foreground"
-              >
+            {/* Render the link AS the button (asChild + Slot) so we don't
+                produce nested <a><button> markup, which is invalid and
+                breaks keyboard / screen-reader behaviour. */}
+            <Button
+              asChild
+              variant="ghost"
+              size="sm"
+              className="gap-2 text-muted-foreground hover:text-foreground"
+            >
+              <Link href="/history">
                 <History className="h-3.5 w-3.5" />
+                {/* Visible label on >=sm; sr-only fallback so the icon-only
+                    mobile rendering still has an accessible name. */}
                 <span className="hidden sm:inline">History</span>
-              </Button>
-            </Link>
+                <span className="sr-only sm:hidden">History</span>
+              </Link>
+            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -50,6 +57,7 @@ export function ResultsView({ result, onReset, cachedAt }: ResultsViewProps) {
             >
               <RotateCcw className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">New audit</span>
+              <span className="sr-only sm:hidden">New audit</span>
             </Button>
           </div>
         </div>

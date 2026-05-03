@@ -35,12 +35,19 @@ export default async function HistoryPage() {
             </div>
             <span className="font-mono tracking-tight">PresenceScore</span>
           </Link>
-          <Link href="/">
-            <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-foreground">
+          {/* asChild renders the <Link> AS the button so we get a single
+              interactive element (an anchor) instead of nested <a><button>. */}
+          <Button
+            asChild
+            variant="ghost"
+            size="sm"
+            className="gap-2 text-muted-foreground hover:text-foreground"
+          >
+            <Link href="/">
               <ArrowLeft className="h-3.5 w-3.5" />
               Back
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         </div>
       </header>
 
@@ -61,9 +68,9 @@ export default async function HistoryPage() {
             <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
               Run your first audit to see it here. Reports stay available so you can come back to them anytime.
             </p>
-            <Link href="/" className="mt-6 inline-block">
-              <Button size="sm">Run an audit</Button>
-            </Link>
+            <Button asChild size="sm" className="mt-6">
+              <Link href="/">Run an audit</Link>
+            </Button>
           </div>
         ) : (
           <ul className="flex flex-col gap-3">
