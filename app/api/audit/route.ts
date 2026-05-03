@@ -29,17 +29,6 @@ export async function POST(req: Request) {
     provider,
   );
 
-  const runsUsed = await getUserPipelineRunCount(userId);
-  if (runsUsed >= FREE_PIPELINE_RUNS) {
-    return NextResponse.json(
-      {
-        error: "You've used both free audits. Upgrade to run more.",
-        quotaExceeded: true,
-      },
-      { status: 403 },
-    );
-  }
-
   const { restaurantName, postcode } = await req.json();
 
   if (!restaurantName || !postcode) {
@@ -54,6 +43,35 @@ export async function POST(req: Request) {
     );
   }
 
+  // Cache hits do NOT count against the user's quota — serve them even if the
+  // user has used all their free audits, since we're not running anything.
+  const recent = await getRecentAuditByRestaurant(restaurantName, postcode);
+  if (recent) {
+    console.log(
+      `[api/audit] CACHE HIT name="${restaurantName}" postcode="${postcode}" -> runId=${recent.run_id} createdAt=${recent.created_at}`,
+    );
+    return NextResponse.json({
+      runId: recent.run_id,
+      cached: true,
+      cachedAt: recent.created_at,
+      result: recent.result,
+    });
+  }
+
+  // No cache hit — this will trigger a real audit, so enforce the quota.
+  const runsUsed = await getUserPipelineRunCount(userId);
+  if (runsUsed >= FREE_PIPELINE_RUNS) {
+    return NextResponse.json(
+      {
+        error: "You've used both free audits. Upgrade to run more.",
+        quotaExceeded: true,
+      },
+      { status: 403 },
+    );
+  }
+
+  // Only validate the name with the LLM when we're about to actually run an
+  // audit — this avoids burning an LLM call on cache hits.
   try {
     const llmResult = await validateRestaurantName(restaurantName, postcode);
     if (!llmResult.valid) {
@@ -67,20 +85,6 @@ export async function POST(req: Request) {
     }
   } catch (err) {
     console.error("[api/audit] LLM name validation failed, failing open:", err);
-  }
-
-  // Cache hits do NOT count against the user's quota.
-  const recent = await getRecentAuditByRestaurant(restaurantName, postcode);
-  if (recent) {
-    console.log(
-      `[api/audit] CACHE HIT name="${restaurantName}" postcode="${postcode}" -> runId=${recent.run_id} createdAt=${recent.created_at}`,
-    );
-    return NextResponse.json({
-      runId: recent.run_id,
-      cached: true,
-      cachedAt: recent.created_at,
-      result: recent.result,
-    });
   }
 
   console.log(`[api/audit] CACHE MISS — starting workflow name="${restaurantName}" postcode="${postcode}"`);

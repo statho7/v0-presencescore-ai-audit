@@ -71,7 +71,7 @@ export function LandingView({
   }
 
   const badgeText = !isSignedIn
-    ? "Free AI audit · No login required"
+    ? "Sign in for 2 free audits · No card required"
     : quotaHit
       ? "Free audits used · Upgrade for unlimited"
       : `2 free audits · ${runsRemaining} remaining`;
