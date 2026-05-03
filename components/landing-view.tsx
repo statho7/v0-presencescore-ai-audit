@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { signIn } from "next-auth/react";
-import { ArrowRight, Sparkles, Search, BarChart2, Zap, Github, CheckCircle2 } from "lucide-react";
+import { ArrowRight, Sparkles, Search, BarChart2, Zap, Github, CheckCircle2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -37,8 +37,15 @@ export function LandingView({
   const [name, setName] = useState("");
   const [postcode, setPostcode] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [waitlistEmail, setWaitlistEmail] = useState("");
   const [waitlistState, setWaitlistState] = useState<"idle" | "submitting" | "done">("idle");
+
+  // Reset the loading state if the parent reports an error — the form stays
+  // visible and the button must become clickable again.
+  useEffect(() => {
+    if (apiError) setIsSubmitting(false);
+  }, [apiError]);
 
   const displayError = apiError ?? error;
   const runsRemaining = Math.max(0, runsAllowed - runsUsed);
@@ -51,6 +58,7 @@ export function LandingView({
       return;
     }
     setError(null);
+    setIsSubmitting(true);
     onSubmit(name.trim(), postcode.trim().toUpperCase());
   }
 
@@ -197,9 +205,18 @@ export function LandingView({
 
               {isSignedIn ? (
                 <>
-                  <Button type="submit" size="lg" className="mt-4 h-12 w-full gap-2 text-base font-medium">
-                    Run audit
-                    <ArrowRight className="h-4 w-4" />
+                  <Button type="submit" size="lg" disabled={isSubmitting} className="mt-4 h-12 w-full gap-2 text-base font-medium">
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Starting…
+                      </>
+                    ) : (
+                      <>
+                        Run audit
+                        <ArrowRight className="h-4 w-4" />
+                      </>
+                    )}
                   </Button>
                   <p className="mt-3 text-center text-xs text-muted-foreground">
                     {runsRemaining} of {runsAllowed} free audits remaining
