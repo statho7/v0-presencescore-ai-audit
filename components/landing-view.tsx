@@ -248,7 +248,7 @@ export function LandingView({
           <div className="mb-12 text-center">
             <h2 className="text-balance text-2xl font-semibold tracking-tight md:text-3xl">How it works</h2>
             <p className="mt-3 text-pretty text-sm leading-relaxed text-muted-foreground md:text-base">
-              Your full online audit delivered in under two minutes — no account needed.
+              Your full online audit delivered in under two minutes.
             </p>
           </div>
 
