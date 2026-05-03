@@ -6,7 +6,10 @@
  * everything that's noise so we can match them as the same place.
  */
 
-const UK_POSTCODE_RE = /[A-Z]{1,2}[0-9][A-Z0-9]?\s*[0-9][A-Z]{2}/i
+// Outward part is mandatory ("SE1", "E1", "WC2N"); inward part ("8HA") is optional.
+// Greedy matching means a full postcode is still preferred when present, so
+// "London E1 6JL" → "E1 6JL" but "venues near SE1" → "SE1".
+const UK_POSTCODE_RE = /[A-Z]{1,2}[0-9][A-Z0-9]?(?:\s*[0-9][A-Z]{2})?/i
 
 // Words we strip from restaurant names before comparing. These rarely change
 // the identity of a place ("Brat" vs "Brat Restaurant" is the same venue).

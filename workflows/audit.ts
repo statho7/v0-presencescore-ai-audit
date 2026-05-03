@@ -514,7 +514,10 @@ async function auditInstagram(identity: Identity): Promise<SocialAudit> {
       await emit({ type: "step_done", stepId: "instagram", log });
       return audit;
     }
-    const log = `${audit.followers.toLocaleString()} followers · ${audit.postsLast30Days} posts/30d · ${audit.hasReels ? "Has reels" : "No recent reels"}`;
+    // Prefer the handle resolved from identity; the helper may have found one
+    // via Google fallback but doesn't return it. Fall back to a generic prefix.
+    const handleLabel = identity.instagramHandle ? `@${identity.instagramHandle} · ` : "";
+    const log = `${handleLabel}${audit.followers.toLocaleString()} followers · ${audit.postsLast30Days} posts/30d · ${audit.hasReels ? "Has reels" : "No recent reels"}`;
     console.log(`[auditInstagram] DONE log="${log}"`);
     await emit({ type: "step_done", stepId: "instagram", log });
     return audit;
@@ -692,12 +695,18 @@ async function benchmarkCompetitorsFull(
   await emit({ type: "step_start", stepId: "competitors" });
 
   const names = competitors.slice(0, 5);
+  // Competitors live in the same postcode district as the main restaurant but
+  // typically have a different specific postcode. Look up by the outward code
+  // ("SE1" from "SE1 8HA") so the deterministic cache match (which now does
+  // prefix matching on `postcode_normalized`) hits any prior audit in the same
+  // district — including ones saved from a different main-flow restaurant.
+  const district = postcode.split(" ")[0];
   const results: CompetitorData[] = [];
 
   for (const name of names) {
     // 1. Check DB cache first (7-day TTL, same as main restaurant)
     try {
-      const cached = await getRecentAuditByRestaurant(name, postcode);
+      const cached = await getRecentAuditByRestaurant(name, district);
       if (cached) {
         console.log(`[benchmarkCompetitorsFull] CACHE HIT name="${name}" runId=${cached.run_id}`);
         const r = cached.result;
