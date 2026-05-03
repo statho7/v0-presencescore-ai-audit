@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
+import { useSession } from "next-auth/react"
 import { LandingView } from "@/components/landing-view"
 import { ResultsView } from "@/components/results-view"
 import { RunningView } from "@/components/running-view"
@@ -9,6 +10,9 @@ import type { AuditResult } from "@/lib/audit-data"
 type Stage = "landing" | "running" | "results"
 
 export default function Home() {
+  const { status } = useSession()
+  const isSignedIn = status === "authenticated"
+
   const [stage, setStage] = useState<Stage>("landing")
   const [restaurantName, setRestaurantName] = useState("")
   const [postcode, setPostcode] = useState("")
@@ -16,6 +20,29 @@ export default function Home() {
   const [result, setResult] = useState<AuditResult | null>(null)
   const [cachedAt, setCachedAt] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [usage, setUsage] = useState<{ runsUsed: number; runsAllowed: number }>({
+    runsUsed: 0,
+    runsAllowed: 2,
+  })
+
+  const fetchUsage = useCallback(async () => {
+    try {
+      const res = await fetch("/api/usage")
+      if (!res.ok) return
+      const data = await res.json()
+      if (typeof data.runsUsed === "number" && typeof data.runsAllowed === "number") {
+        setUsage({ runsUsed: data.runsUsed, runsAllowed: data.runsAllowed })
+      }
+    } catch {
+      // ignore — fall back to defaults
+    }
+  }, [])
+
+  useEffect(() => {
+    if (isSignedIn) {
+      fetchUsage()
+    }
+  }, [isSignedIn, fetchUsage])
 
   // Resume an in-flight audit when arriving via /?runId=... — this happens
   // when /results/[runId] redirects here because the audit hasn't been
@@ -43,7 +70,13 @@ export default function Home() {
         body: JSON.stringify({ restaurantName: name, postcode: code }),
       })
 
-      if (!res.ok) throw new Error("Failed to start audit")
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        if (res.status === 403 && data?.quotaExceeded) {
+          setUsage((u) => ({ ...u, runsUsed: u.runsAllowed }))
+        }
+        throw new Error(data?.error || "Failed to start audit")
+      }
       const data = await res.json()
       setRunId(data.runId)
 
@@ -59,6 +92,8 @@ export default function Home() {
       }
 
       setStage("running")
+      // Re-fetch usage so the counter reflects the just-started run.
+      fetchUsage()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start audit")
     }
@@ -84,10 +119,19 @@ export default function Home() {
     if (typeof window !== "undefined") {
       window.history.pushState({}, "", "/")
     }
+    if (isSignedIn) fetchUsage()
   }
 
   if (stage === "landing") {
-    return <LandingView onSubmit={handleSubmit} error={error} />
+    return (
+      <LandingView
+        onSubmit={handleSubmit}
+        error={error}
+        runsUsed={usage.runsUsed}
+        runsAllowed={usage.runsAllowed}
+        isSignedIn={isSignedIn}
+      />
+    )
   }
 
   if (stage === "running" && runId) {

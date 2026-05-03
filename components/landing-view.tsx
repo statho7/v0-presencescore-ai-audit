@@ -1,22 +1,48 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { ArrowRight, Sparkles, Search, BarChart2, Zap } from "lucide-react";
+import { signIn } from "next-auth/react";
+import { ArrowRight, Sparkles, Search, BarChart2, Zap, Github, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AuthButton } from "@/components/auth-button";
 
 type LandingViewProps = {
   onSubmit: (restaurantName: string, postcode: string) => void;
   error?: string | null;
+  runsUsed: number;
+  runsAllowed: number;
+  isSignedIn: boolean;
 };
 
-export function LandingView({ onSubmit, error: apiError }: LandingViewProps) {
+function GoogleIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        fill="#EA4335"
+        d="M12 10.2v3.92h5.45c-.24 1.42-1.7 4.16-5.45 4.16-3.28 0-5.96-2.72-5.96-6.08s2.68-6.08 5.96-6.08c1.87 0 3.12.8 3.84 1.48l2.62-2.52C16.84 3.6 14.66 2.6 12 2.6 6.84 2.6 2.66 6.78 2.66 11.94S6.84 21.28 12 21.28c5.46 0 9.08-3.84 9.08-9.24 0-.62-.06-1.1-.16-1.84H12z"
+      />
+    </svg>
+  );
+}
+
+export function LandingView({
+  onSubmit,
+  error: apiError,
+  runsUsed,
+  runsAllowed,
+  isSignedIn,
+}: LandingViewProps) {
   const [name, setName] = useState("");
   const [postcode, setPostcode] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [waitlistEmail, setWaitlistEmail] = useState("");
+  const [waitlistState, setWaitlistState] = useState<"idle" | "submitting" | "done">("idle");
 
   const displayError = apiError ?? error;
+  const runsRemaining = Math.max(0, runsAllowed - runsUsed);
+  const quotaHit = isSignedIn && runsUsed >= runsAllowed;
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -27,6 +53,28 @@ export function LandingView({ onSubmit, error: apiError }: LandingViewProps) {
     setError(null);
     onSubmit(name.trim(), postcode.trim().toUpperCase());
   }
+
+  async function handleWaitlistSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!waitlistEmail.trim()) return;
+    setWaitlistState("submitting");
+    try {
+      await fetch("/api/waitlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: waitlistEmail.trim() }),
+      });
+      setWaitlistState("done");
+    } catch {
+      setWaitlistState("idle");
+    }
+  }
+
+  const badgeText = !isSignedIn
+    ? "Sign in for 2 free audits · No card required"
+    : quotaHit
+      ? "Free audits used · Upgrade for unlimited"
+      : `2 free audits · ${runsRemaining} remaining`;
 
   return (
     <div id="top" className="relative flex min-h-screen flex-col">
@@ -43,10 +91,8 @@ export function LandingView({ onSubmit, error: apiError }: LandingViewProps) {
           </div>
           <span className="font-mono text-sm tracking-tight">PresenceScore</span>
         </div>
-        <nav className="hidden items-center gap-6 text-sm text-muted-foreground md:flex">
-          <a className="hover:text-foreground transition-colors" href="#how">
-            How it works
-          </a>
+        <nav className="flex items-center gap-3">
+          <AuthButton />
         </nav>
       </header>
 
@@ -57,7 +103,7 @@ export function LandingView({ onSubmit, error: apiError }: LandingViewProps) {
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
             </span>
-            Free AI audit · No login required
+            {badgeText}
           </div>
 
           <h1 className="text-balance text-4xl font-semibold tracking-tight md:text-6xl">
@@ -70,50 +116,125 @@ export function LandingView({ onSubmit, error: apiError }: LandingViewProps) {
             list of fixes you can ship this week.
           </p>
 
-          <form
-            onSubmit={handleSubmit}
-            className="mt-10 w-full rounded-2xl border border-border bg-card/60 p-4 shadow-2xl shadow-black/40 backdrop-blur-sm md:p-5"
-          >
-            <div className="grid gap-4 md:grid-cols-[1fr_180px]">
-              <div className="flex flex-col gap-2 text-left">
-                <Label htmlFor="restaurant" className="text-xs uppercase tracking-wider text-muted-foreground">
-                  Restaurant name
-                </Label>
-                <Input
-                  id="restaurant"
-                  placeholder="e.g. Brawn"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="h-11 border-border/80 bg-background/40 text-base focus-visible:ring-primary/40"
-                  autoComplete="off"
-                />
-              </div>
-              <div className="flex flex-col gap-2 text-left">
-                <Label htmlFor="postcode" className="text-xs uppercase tracking-wider text-muted-foreground">
-                  London postcode
-                </Label>
-                <Input
-                  id="postcode"
-                  placeholder="E1 6RF"
-                  value={postcode}
-                  onChange={(e) => setPostcode(e.target.value)}
-                  className="h-11 border-border/80 bg-background/40 font-mono text-base uppercase focus-visible:ring-primary/40"
-                  autoComplete="off"
-                />
-              </div>
-            </div>
-
-            {displayError && (
-              <p role="alert" className="mt-3 text-left text-sm text-destructive">
-                {displayError}
+          {quotaHit ? (
+            <div className="mt-10 w-full rounded-2xl border border-border bg-card/60 p-6 shadow-2xl shadow-black/40 backdrop-blur-sm md:p-8">
+              <h2 className="text-balance text-xl font-semibold tracking-tight md:text-2xl">
+                You&apos;ve used your 2 free audits
+              </h2>
+              <p className="mt-3 text-pretty text-sm leading-relaxed text-muted-foreground md:text-base">
+                Weekly monitoring and unlimited audits are coming. Leave your email and we&apos;ll notify you when it
+                launches.
               </p>
-            )}
 
-            <Button type="submit" size="lg" className="mt-4 h-12 w-full gap-2 text-base font-medium">
-              Run audit
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          </form>
+              {waitlistState === "done" ? (
+                <div className="mt-6 flex items-center justify-center gap-2 rounded-lg border border-border bg-background/40 px-4 py-3 text-sm text-foreground">
+                  <CheckCircle2 className="h-4 w-4 text-primary" />
+                  Thanks — we&apos;ll be in touch.
+                </div>
+              ) : (
+                <form
+                  onSubmit={handleWaitlistSubmit}
+                  className="mt-6 flex flex-col gap-3 text-left sm:flex-row"
+                >
+                  <Input
+                    type="email"
+                    required
+                    placeholder="you@restaurant.com"
+                    value={waitlistEmail}
+                    onChange={(e) => setWaitlistEmail(e.target.value)}
+                    className="h-11 border-border/80 bg-background/40 text-base focus-visible:ring-primary/40"
+                  />
+                  <Button
+                    type="submit"
+                    size="lg"
+                    disabled={waitlistState === "submitting"}
+                    className="h-11 sm:w-auto"
+                  >
+                    {waitlistState === "submitting" ? "Sending…" : "Notify me"}
+                  </Button>
+                </form>
+              )}
+            </div>
+          ) : (
+            <form
+              onSubmit={handleSubmit}
+              className="mt-10 w-full rounded-2xl border border-border bg-card/60 p-4 shadow-2xl shadow-black/40 backdrop-blur-sm md:p-5"
+            >
+              <div className="grid gap-4 md:grid-cols-[1fr_180px]">
+                <div className="flex flex-col gap-2 text-left">
+                  <Label htmlFor="restaurant" className="text-xs uppercase tracking-wider text-muted-foreground">
+                    Restaurant name
+                  </Label>
+                  <Input
+                    id="restaurant"
+                    placeholder="e.g. Brawn"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="h-11 border-border/80 bg-background/40 text-base focus-visible:ring-primary/40"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="flex flex-col gap-2 text-left">
+                  <Label htmlFor="postcode" className="text-xs uppercase tracking-wider text-muted-foreground">
+                    London postcode
+                  </Label>
+                  <Input
+                    id="postcode"
+                    placeholder="E1 6RF"
+                    value={postcode}
+                    onChange={(e) => setPostcode(e.target.value)}
+                    className="h-11 border-border/80 bg-background/40 font-mono text-base uppercase focus-visible:ring-primary/40"
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+
+              {displayError && (
+                <p role="alert" className="mt-3 text-left text-sm text-destructive">
+                  {displayError}
+                </p>
+              )}
+
+              {isSignedIn ? (
+                <>
+                  <Button type="submit" size="lg" className="mt-4 h-12 w-full gap-2 text-base font-medium">
+                    Run audit
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                  <p className="mt-3 text-center text-xs text-muted-foreground">
+                    {runsRemaining} of {runsAllowed} free audits remaining
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="mt-4 flex flex-col gap-2">
+                    <Button
+                      type="button"
+                      size="lg"
+                      onClick={() => signIn("google", { callbackUrl: "/" })}
+                      className="h-12 w-full gap-2 text-base font-medium"
+                    >
+                      <GoogleIcon className="h-4 w-4" />
+                      Continue with Google
+                    </Button>
+                    <Button
+                      type="button"
+                      size="lg"
+                      variant="outline"
+                      onClick={() => signIn("github", { callbackUrl: "/" })}
+                      className="h-12 w-full gap-2 text-base font-medium"
+                    >
+                      <Github className="h-4 w-4" />
+                      Continue with GitHub
+                    </Button>
+                  </div>
+                  <p className="mt-3 text-center text-xs text-muted-foreground">
+                    Sign in to run your free audit — no card required.
+                  </p>
+                </>
+              )}
+            </form>
+          )}
 
           <p id="trust" className="mt-6 text-sm text-muted-foreground">
             Used by <span className="text-foreground">500+ London restaurants</span> · Updated daily
@@ -127,7 +248,7 @@ export function LandingView({ onSubmit, error: apiError }: LandingViewProps) {
           <div className="mb-12 text-center">
             <h2 className="text-balance text-2xl font-semibold tracking-tight md:text-3xl">How it works</h2>
             <p className="mt-3 text-pretty text-sm leading-relaxed text-muted-foreground md:text-base">
-              Your full online audit delivered in under two minutes — no account needed.
+              Your full online audit delivered in under two minutes.
             </p>
           </div>
 
@@ -146,9 +267,9 @@ export function LandingView({ onSubmit, error: apiError }: LandingViewProps) {
                   1
                 </span>
               </div>
-              <h3 className="mb-2 text-sm font-semibold tracking-tight">Enter your details</h3>
+              <h3 className="mb-2 text-sm font-semibold tracking-tight">Sign in & enter your details</h3>
               <p className="text-sm leading-relaxed text-muted-foreground">
-                Just your restaurant name and London postcode. Nothing else — no sign-up, no card.
+                Sign in free with Google or GitHub — no card required.
               </p>
             </div>
 
