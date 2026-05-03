@@ -32,8 +32,8 @@ export const AUDIT_STEPS: AuditStep[] = [
   },
   {
     id: "competitors",
-    label: "Benchmarking 5 competitors",
-    log: "Compared against E1/E2 venues in same cuisine band",
+    label: "Running full audit on 5 competitors",
+    log: "Compared against venues in the same postcode district",
   },
   {
     id: "score",
@@ -65,7 +65,14 @@ export type QuickWin = {
 
 export type Competitor = {
   name: string
+  /** Real numeric score — used internally for sorting. */
   score: number
+  /**
+   * Display string for non-`isYou` rows, e.g. `"60–70"`. Acknowledges that
+   * competitor scores are derived from a (sometimes flaky) automated pipeline,
+   * so we present them as a 10-point band rather than an exact number.
+   */
+  scoreRange?: string
   gbpPhotos: number
   pressMentions: number
   bookingLink: boolean
@@ -90,6 +97,15 @@ export type AuditResult = {
   narrative: string[]
   competitors: Competitor[]
   articles: CoverageArticle[]
+  /**
+   * Internal fields populated only for competitor-only audits (audits saved
+   * via `benchmarkCompetitorsFull`). Lets us reconstruct the competitor row
+   * fields from a cached `AuditResult` without re-running the pipeline.
+   * Not displayed in the UI.
+   */
+  _gbpPhotoCount?: number
+  _pressMentions?: number
+  _bookingLink?: boolean
 }
 
 export function generateAuditResult(
