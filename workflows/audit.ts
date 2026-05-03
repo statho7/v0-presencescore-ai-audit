@@ -242,23 +242,22 @@ async function auditGbp(identity: Identity): Promise<GbpAudit> {
   console.log(`[auditGbp] START name="${identity.canonicalName}" photos=${identity.gbpPhotos} reviews=${identity.gbpReviews}`);
   await emit({ type: "step_start", stepId: "gbp" });
 
-  // Use the plain restaurant name query — this triggers Google's knowledge panel
-  // which sometimes surfaces "X photos" in the text. site:google.com/maps is blocked.
-  const serpData = await serpSearch(`"${identity.canonicalName}" "${identity.address.split(",")[0]}" London pub restaurant`);
+  try {
+    const serpData = await serpSearch(`"${identity.canonicalName}" "${identity.address.split(",")[0]}" London pub restaurant`);
 
-  const raw = serpData;
+    const raw = serpData;
 
-  const gbpSchema = z.object({
-    gbpClaimed: z.boolean(),
-    inLocalPack: z.boolean(),
-    photoCount: z.number(),
-    hasBookingLink: z.boolean(),
-    hasHours: z.boolean(),
-    hasMenuLink: z.boolean(),
-    specificCategory: z.boolean(),
-  });
+    const gbpSchema = z.object({
+      gbpClaimed: z.boolean(),
+      inLocalPack: z.boolean(),
+      photoCount: z.number(),
+      hasBookingLink: z.boolean(),
+      hasHours: z.boolean(),
+      hasMenuLink: z.boolean(),
+      specificCategory: z.boolean(),
+    });
 
-  const audit = await askStructured("gbp", `Analyse Google data to audit a restaurant's Google Business Profile.
+    const audit = await askStructured("gbp", `Analyse Google data to audit a restaurant's Google Business Profile.
 
 Restaurant: ${identity.canonicalName}, ${identity.address}
 Known signals:
@@ -273,25 +272,29 @@ Rules:
 - hasBookingLink: true if Reserve, Book, OpenTable, Resy, SevenRooms appears — or use ${identity.hasBookingLink}
 - hasMenuLink: true if a menu URL or "Menu" link appears
 - specificCategory: true if a specific cuisine type appears (Pub, British, Thai, Italian etc)`, gbpSchema);
-  // Google Maps photo counts are JavaScript-rendered and not accessible via scraping.
-  // When Claude can't find a number, infer from review count: high review volume
-  // correlates strongly with photo uploads (typically 0.1–0.3 photos per review).
-  const inferredPhotoCount =
-    audit.photoCount > 0
-      ? audit.photoCount
-      : identity.gbpReviews >= 500
-        ? Math.round(identity.gbpReviews * 0.15)
-        : identity.gbpReviews >= 100
-          ? Math.round(identity.gbpReviews * 0.1)
-          : 0;
 
-  const auditWithPhotos = { ...audit, photoCount: inferredPhotoCount };
-  console.log(`[auditGbp] parsed audit=${JSON.stringify(audit)} inferredPhotoCount=${inferredPhotoCount}`);
+    const inferredPhotoCount =
+      audit.photoCount > 0
+        ? audit.photoCount
+        : identity.gbpReviews >= 500
+          ? Math.round(identity.gbpReviews * 0.15)
+          : identity.gbpReviews >= 100
+            ? Math.round(identity.gbpReviews * 0.1)
+            : 0;
 
-  const log = `~${inferredPhotoCount} photos (inferred) · ${auditWithPhotos.hasBookingLink ? "Booking link found" : "No booking link"} · ${auditWithPhotos.hasHours ? "Hours set" : "No hours"}`;
-  console.log(`[auditGbp] DONE log="${log}"`);
-  await emit({ type: "step_done", stepId: "gbp", log });
-  return auditWithPhotos;
+    const auditWithPhotos = { ...audit, photoCount: inferredPhotoCount };
+    console.log(`[auditGbp] parsed audit=${JSON.stringify(audit)} inferredPhotoCount=${inferredPhotoCount}`);
+
+    const log = `~${inferredPhotoCount} photos (inferred) · ${auditWithPhotos.hasBookingLink ? "Booking link found" : "No booking link"} · ${auditWithPhotos.hasHours ? "Hours set" : "No hours"}`;
+    console.log(`[auditGbp] DONE log="${log}"`);
+    await emit({ type: "step_done", stepId: "gbp", log });
+    return auditWithPhotos;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(`[auditGbp] ERROR err="${msg}"`);
+    await emit({ type: "step_error", stepId: "gbp", error: msg });
+    return { gbpClaimed: false, inLocalPack: false, photoCount: 0, hasBookingLink: false, hasHours: false, hasMenuLink: false, specificCategory: false };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -330,20 +333,21 @@ async function auditWebsite(identity: Identity): Promise<WebsiteAudit> {
     };
   }
 
-  const html = await unlockUrl(identity.websiteUrl);
+  try {
+    const html = await unlockUrl(identity.websiteUrl);
 
-  const websiteSchema = z.object({
-    websiteLoads: z.boolean(),
-    htmlMenu: z.boolean(),
-    bookingWidget: z.boolean(),
-    schemaMarkup: z.boolean(),
-    allergenInfo: z.boolean(),
-    socialLinks: z.boolean(),
-    aboutPage: z.boolean(),
-    mobileScore: z.number(),
-  });
+    const websiteSchema = z.object({
+      websiteLoads: z.boolean(),
+      htmlMenu: z.boolean(),
+      bookingWidget: z.boolean(),
+      schemaMarkup: z.boolean(),
+      allergenInfo: z.boolean(),
+      socialLinks: z.boolean(),
+      aboutPage: z.boolean(),
+      mobileScore: z.number(),
+    });
 
-  const audit = await askStructured("website", `Audit this restaurant website HTML for digital presence signals.
+    const audit = await askStructured("website", `Audit this restaurant website HTML for digital presence signals.
 
 Restaurant: ${identity.canonicalName}
 Website HTML (truncated): ${html}
@@ -357,13 +361,19 @@ Rules:
 - socialLinks: true if Instagram, Facebook, or Twitter links appear
 - aboutPage: true if an About or Story section exists
 - mobileScore: estimate 0-100 based on viewport meta, responsive CSS, font sizes`, websiteSchema);
-  const auditWithLoads = { ...audit, websiteLoads: true };
-  console.log(`[auditWebsite] parsed audit=${JSON.stringify(auditWithLoads)}`);
+    const auditWithLoads = { ...audit, websiteLoads: true };
+    console.log(`[auditWebsite] parsed audit=${JSON.stringify(auditWithLoads)}`);
 
-  const log = `Mobile score ~${auditWithLoads.mobileScore} · ${auditWithLoads.schemaMarkup ? "Schema markup found" : "No schema markup"} · ${auditWithLoads.bookingWidget ? "Booking widget present" : "No booking widget"}`;
-  console.log(`[auditWebsite] DONE log="${log}"`);
-  await emit({ type: "step_done", stepId: "website", log });
-  return auditWithLoads;
+    const log = `Mobile score ~${auditWithLoads.mobileScore} · ${auditWithLoads.schemaMarkup ? "Schema markup found" : "No schema markup"} · ${auditWithLoads.bookingWidget ? "Booking widget present" : "No booking widget"}`;
+    console.log(`[auditWebsite] DONE log="${log}"`);
+    await emit({ type: "step_done", stepId: "website", log });
+    return auditWithLoads;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(`[auditWebsite] ERROR err="${msg}"`);
+    await emit({ type: "step_error", stepId: "website", error: msg });
+    return { websiteLoads: false, htmlMenu: false, bookingWidget: false, schemaMarkup: false, allergenInfo: false, socialLinks: false, aboutPage: false, mobileScore: 0 };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -419,21 +429,22 @@ No JSON, no markdown — just the raw handle string or empty string.`);
     };
   }
 
-  const html = await getInstagramProfile(handle);
-  console.log(`[auditInstagram] serp length=${html.length}`);
+  try {
+    const html = await getInstagramProfile(handle);
+    console.log(`[auditInstagram] serp length=${html.length}`);
 
-  const socialSchema = z.object({
-    instagramLinked: z.boolean(),
-    followers: z.number(),
-    postsLast30Days: z.number(),
-    postedLast14Days: z.boolean(),
-    customerInstagramPosts: z.number(),
-    hasReels: z.boolean(),
-    engagementAboveMedian: z.boolean(),
-    tiktokExists: z.boolean(),
-  });
+    const socialSchema = z.object({
+      instagramLinked: z.boolean(),
+      followers: z.number(),
+      postsLast30Days: z.number(),
+      postedLast14Days: z.boolean(),
+      customerInstagramPosts: z.number(),
+      hasReels: z.boolean(),
+      engagementAboveMedian: z.boolean(),
+      tiktokExists: z.boolean(),
+    });
 
-  const audit = await askStructured("instagram", `Extract Instagram presence data for a London restaurant from this page data.
+    const audit = await askStructured("instagram", `Extract Instagram presence data for a London restaurant from this page data.
 
 Handle: @${handle}
 Page data (may be raw HTML from instagram.com or a Google SERP snippet): ${html}
@@ -452,12 +463,18 @@ Rules:
 - hasReels: true if "Reels" tab, reel icon, or reel content is mentioned
 - engagementAboveMedian: true if strong engagement signals appear relative to follower count
 - tiktokExists: true if a TikTok account for this restaurant is mentioned`, socialSchema);
-  console.log(`[auditInstagram] parsed audit=${JSON.stringify(audit)}`);
+    console.log(`[auditInstagram] parsed audit=${JSON.stringify(audit)}`);
 
-  const log = `@${handle} · ${audit.followers.toLocaleString()} followers · ${audit.postsLast30Days} posts/30d · ${audit.hasReels ? "Has reels" : "No recent reels"}`;
-  console.log(`[auditInstagram] DONE log="${log}"`);
-  await emit({ type: "step_done", stepId: "instagram", log });
-  return audit;
+    const log = `@${handle} · ${audit.followers.toLocaleString()} followers · ${audit.postsLast30Days} posts/30d · ${audit.hasReels ? "Has reels" : "No recent reels"}`;
+    console.log(`[auditInstagram] DONE log="${log}"`);
+    await emit({ type: "step_done", stepId: "instagram", log });
+    return audit;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(`[auditInstagram] ERROR err="${msg}"`);
+    await emit({ type: "step_error", stepId: "instagram", error: msg });
+    return { instagramLinked: false, followers: 0, postsLast30Days: 0, postedLast14Days: false, customerInstagramPosts: 0, hasReels: false, engagementAboveMedian: false, tiktokExists: false };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -486,29 +503,30 @@ async function auditPress(identity: Identity): Promise<PressAudit> {
     .replace(/\s+(restaurant|bar|café|cafe|bistro|brasserie|kitchen|grill|pub|eatery|dining)\s*$/i, "")
     .trim() || identity.canonicalName;
 
-  // Google News sorted newest-first. Second query covers food media not in News (Eater, Hot Dinners etc), also newest-first.
-  const newsQuery = `"${pressName}" London restaurant`;
-  const broadQuery = `"${pressName}" London restaurant review (site:theguardian.com OR site:timeout.com OR site:standard.co.uk OR site:telegraph.co.uk OR site:independent.co.uk OR site:eater.com OR site:hotdinners.com)`;
-  console.log(`[auditPress] pressName="${pressName}" newsQuery="${newsQuery}"`);
-  const [newsRaw, broadRaw] = await Promise.all([
-    serpSearch(newsQuery, true, true, true),
-    serpSearch(broadQuery, false, true, true),
-  ]);
-  const raw = `=== GOOGLE NEWS ===\n${newsRaw}\n\n=== FOOD PRESS SERP ===\n${broadRaw}`;
+  try {
+    // Google News sorted newest-first. Second query covers food media not in News (Eater, Hot Dinners etc), also newest-first.
+    const newsQuery = `"${pressName}" London restaurant`;
+    const broadQuery = `"${pressName}" London restaurant review (site:theguardian.com OR site:timeout.com OR site:standard.co.uk OR site:telegraph.co.uk OR site:independent.co.uk OR site:eater.com OR site:hotdinners.com)`;
+    console.log(`[auditPress] pressName="${pressName}" newsQuery="${newsQuery}"`);
+    const [newsRaw, broadRaw] = await Promise.all([
+      serpSearch(newsQuery, true, true, true),
+      serpSearch(broadQuery, false, true, true),
+    ]);
+    const raw = `=== GOOGLE NEWS ===\n${newsRaw}\n\n=== FOOD PRESS SERP ===\n${broadRaw}`;
 
-  const pressSchema = z.object({
-    articleCount: z.number(),
-    anyCoverageIn12Months: z.boolean(),
-    tier1Coverage: z.boolean(),
-    positiveSentiment: z.boolean(),
-    noNegativeInTopResults: z.boolean(),
-    articleTitles: z.array(z.string()),
-    articleSources: z.array(z.string()),
-    articleDates: z.array(z.string()),
-    articleUrls: z.array(z.string()),
-  });
+    const pressSchema = z.object({
+      articleCount: z.number(),
+      anyCoverageIn12Months: z.boolean(),
+      tier1Coverage: z.boolean(),
+      positiveSentiment: z.boolean(),
+      noNegativeInTopResults: z.boolean(),
+      articleTitles: z.array(z.string()),
+      articleSources: z.array(z.string()),
+      articleDates: z.array(z.string()),
+      articleUrls: z.array(z.string()),
+    });
 
-  const audit = await askStructured("press", `Analyse press coverage for a specific London restaurant.
+    const audit = await askStructured("press", `Analyse press coverage for a specific London restaurant.
 
 Restaurant: ${identity.canonicalName}
 Address: ${identity.address}
@@ -522,14 +540,20 @@ Rules:
 - If no relevant articles found, use articleCount: 0 and all false
 - articleTitles: clean article title only (no source name, no date)
 - articleSources: publication name for each article in the same order (e.g. "The Guardian", "Time Out", "Eater London"); use "Unknown" only if genuinely absent
-- articleDates: ISO date string (YYYY-MM-DD) for each article in the same order; infer from URL slugs (e.g. /2023/04/ → "2023-04-01"), snippet dates, or "ago" text (e.g. "3 years ago" from today 2026-05-02); use "" if truly unknown
+- articleDates: ISO date string for each article; infer from URL slugs, snippet dates, or relative dates; use "" if truly unknown
 - articleUrls: for each article, use the matching URL from the [ARTICLE URLS] section in the SERP data (match by domain or title keywords); use "" only if no matching URL can be found`, pressSchema);
-  console.log(`[auditPress] parsed audit=${JSON.stringify(audit)}`);
+    console.log(`[auditPress] parsed audit=${JSON.stringify(audit)}`);
 
-  const log = `${audit.articleCount} article${audit.articleCount !== 1 ? "s" : ""} found · ${audit.tier1Coverage ? "Tier-1 coverage" : "No tier-1"} · ${audit.positiveSentiment ? "Positive sentiment" : "Mixed/negative sentiment"}`;
-  console.log(`[auditPress] DONE log="${log}"`);
-  await emit({ type: "step_done", stepId: "press", log });
-  return audit;
+    const log = `${audit.articleCount} article${audit.articleCount !== 1 ? "s" : ""} found · ${audit.tier1Coverage ? "Tier-1 coverage" : "No tier-1"} · ${audit.positiveSentiment ? "Positive sentiment" : "Mixed/negative sentiment"}`;
+    console.log(`[auditPress] DONE log="${log}"`);
+    await emit({ type: "step_done", stepId: "press", log });
+    return audit;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(`[auditPress] ERROR err="${msg}"`);
+    await emit({ type: "step_error", stepId: "press", error: msg });
+    return { articleCount: 0, anyCoverageIn12Months: false, tier1Coverage: false, positiveSentiment: false, noNegativeInTopResults: false, articleTitles: [], articleSources: [], articleDates: [], articleUrls: [] };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -812,13 +836,23 @@ export async function runAudit(restaurantName: string, postcode: string): Promis
   const identity = await resolveIdentity(restaurantName, postcode);
   console.log(`[runAudit] identity resolved, starting parallel audit steps`);
 
-  const [gbp, website, social, press] = await Promise.all([
+  const [gbpResult, websiteResult, socialResult, pressResult] = await Promise.allSettled([
     auditGbp(identity),
     auditWebsite(identity),
     auditInstagram(identity),
     auditPress(identity),
   ]);
-  console.log(`[runAudit] parallel steps done, starting competitor benchmark`);
+
+  const gbp = gbpResult.status === "fulfilled" ? gbpResult.value
+    : { gbpClaimed: false, inLocalPack: false, photoCount: 0, hasBookingLink: false, hasHours: false, hasMenuLink: false, specificCategory: false };
+  const website = websiteResult.status === "fulfilled" ? websiteResult.value
+    : { websiteLoads: false, htmlMenu: false, bookingWidget: false, schemaMarkup: false, allergenInfo: false, socialLinks: false, aboutPage: false, mobileScore: 0 };
+  const social = socialResult.status === "fulfilled" ? socialResult.value
+    : { instagramLinked: false, followers: 0, postsLast30Days: 0, postedLast14Days: false, customerInstagramPosts: 0, hasReels: false, engagementAboveMedian: false, tiktokExists: false };
+  const press = pressResult.status === "fulfilled" ? pressResult.value
+    : { articleCount: 0, anyCoverageIn12Months: false, tier1Coverage: false, positiveSentiment: false, noNegativeInTopResults: false, articleTitles: [], articleSources: [], articleDates: [], articleUrls: [] };
+
+  console.log(`[runAudit] parallel steps done gbp=${gbpResult.status} website=${websiteResult.status} social=${socialResult.status} press=${pressResult.status}`);
 
   const competitorData = await benchmarkCompetitors(identity.competitors, postcode);
   console.log(`[runAudit] competitor benchmark done, generating report`);
